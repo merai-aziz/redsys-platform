@@ -1,6 +1,5 @@
 'use client'
 import { useState } from 'react'
-import { useRouter } from 'next/navigation'
 import { useForm } from 'react-hook-form'
 import { zodResolver } from '@hookform/resolvers/zod'
 import * as z from 'zod'
@@ -25,7 +24,6 @@ const schema = z.object({
 type FormData = z.infer<typeof schema>
 
 export default function RegisterPage() {
-  const router = useRouter()
   const [loading, setLoading] = useState(false)
 
   const { register, handleSubmit, formState: { errors } } = useForm<FormData>({
@@ -46,7 +44,7 @@ export default function RegisterPage() {
         return
       }
       toast.success('Inscription reussie. Vous pouvez maintenant vous connecter.')
-      router.push('/login')
+      window.location.assign('/login')
     } catch {
       toast.error('Erreur réseau')
     } finally {

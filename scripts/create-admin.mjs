@@ -19,17 +19,17 @@ try {
   await pool.query(`
     INSERT INTO users (
       id, "firstName", "lastName", email, password,
-      "userRole", "isVerified", "isActive", "createdAt"
+      "userRole", "isVerified", "isActive", "createdAt", "updatedAt"
     )
     VALUES (
       gen_random_uuid(),
-      'Super', 'Admin',
-      'admin@redsys.com',
-      '${hash}',
-      'ADMIN', true, true, NOW()
+      $1, $2,
+      $3,
+      $4,
+      'ADMIN', true, true, NOW(), NOW()
     )
     ON CONFLICT (email) DO NOTHING
-  `)
+  `, ['Super', 'Admin', 'admin@redsys.com', hash])
   console.log('✅ Admin créé avec succès !')
   console.log('📧 Email    : admin@redsys.com')
   console.log('🔑 Password : Admin@12345')

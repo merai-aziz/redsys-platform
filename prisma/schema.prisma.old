@@ -1,0 +1,406 @@
+// prisma/schema.prisma
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+enum UserRole {
+  ADMIN
+  EMPLOYEE
+  CLIENT
+}
+
+enum StatusLogEnum {
+  SUCCESS
+  FAILED
+}
+
+enum EquipmentStatusEnum {
+  AVAILABLE
+  OUT_OF_STOCK
+}
+
+enum EquipmentTypeEnum {
+  SERVER
+  STORAGE
+  NETWORK
+  COMPONENT
+}
+
+enum CartStatusEnum {
+  ACTIVE
+  VALIDATED
+}
+
+enum OrderStatusEnum {
+  PENDING
+  PROCESSING
+  COMPLETED
+  CANCELLED
+}
+
+enum PaymentMethodEnum {
+  CARD
+  VIREMENT
+  CHEQUE
+  CASH
+}
+
+enum PaymentStatusEnum {
+  PENDING
+  COMPLETED
+  FAILED
+  REFUNDED
+}
+
+enum TicketStatusEnum {
+  OPEN
+  IN_PROGRESS
+  CLOSED
+}
+
+enum TicketPriorityEnum {
+  LOW
+  MEDIUM
+  HIGH
+}
+
+enum NotificationTypeEnum {
+  ORDER_STATUS_UPDATE
+  TICKET_UPDATE
+  PAYMENT
+  SYSTEM
+}
+
+enum RiskLevelEnum {
+  LOW
+  MEDIUM
+  HIGH
+}
+
+enum ApplicationTypeEnum {
+  ERP
+  WEB
+  DATABASE
+}
+
+model User {
+  id          String    @id @default(uuid())
+  firstName   String
+  lastName    String
+  email       String    @unique
+  password    String
+  userRole    UserRole  @default(CLIENT)
+  companyName String?
+  adresse     String?
+  departement String?
+  phone       String?
+  photo       String?
+  isVerified  Boolean   @default(false)
+  isActive    Boolean   @default(true)
+  createdAt   DateTime  @default(now())
+  lastLogin   DateTime?
+
+  carts         Cart[]
+  quotes        Quote[]
+  orders        Order[]
+  payments      Payment[]
+  tickets       Ticket[]
+  notifications Notification[]
+  simulations   Simulation[]
+  loginLogs     LoginLog[]
+  refreshTokens RefreshToken[]
+
+  @@map("users")
+}
+
+model LoginLog {
+  id          String        @id @default(uuid())
+  userId      String
+  ipAddress   String
+  deviceInfo  String
+  loginDate   DateTime      @default(now())
+  statusLog   StatusLogEnum
+
+  user        User          @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("login_logs")
+}
+
+model RefreshToken {
+  id        String   @id @default(uuid())
+  token     String   @unique
+  userId    String
+  expiresAt DateTime
+  createdAt DateTime @default(now())
+  isRevoked Boolean  @default(false)
+
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("refresh_tokens")
+}
+
+model EquipmentBrand {
+  id          String      @id @default(uuid())
+  name        String
+  logo        String?
+
+  equipment Equipment[]
+
+  @@map("brand")
+}
+
+model EquipmentCategory {
+  id          String               @id @default(uuid())
+  name        String
+  description String?
+  parentId    String?
+  level       Int                  @default(1)
+  slug        String               @unique
+  icon        String?
+
+  parent   EquipmentCategory?  @relation("CategoryHierarchy", fields: [parentId], references: [id], onDelete: SetNull)
+  children EquipmentCategory[] @relation("CategoryHierarchy")
+  equipment Equipment[]
+
+  @@index([parentId])
+  @@map("category")
+}
+
+model Equipment {
+  id                  String                    @id @default(uuid())
+  name                String
+  reference           String                    @unique
+  description         String?
+  price               Decimal?                  @db.Decimal(12, 2)
+  quantity            Int                       @default(0) @map("stockQuantity")
+  status              EquipmentStatusEnum       @default(AVAILABLE)
+  equipmentType       EquipmentTypeEnum         @default(SERVER)
+  brandId             String
+  categoryId          String
+  createdAt           DateTime                  @default(now())
+
+  brand             EquipmentBrand            @relation(fields: [brandId], references: [id], onDelete: Restrict)
+  category          EquipmentCategory         @relation(fields: [categoryId], references: [id], onDelete: Restrict)
+  specs             EquipmentSpec[]
+  images            EquipmentImage[]
+  cartItems         CartItem[]
+  confirms          Confirm[]
+  orderItems        OrderItem[]
+  simulations       Simulation[]
+  technicalScore    TechnicalScore?
+
+  @@index([brandId])
+  @@index([categoryId])
+  @@map("equipment")
+}
+
+model EquipmentSpec {
+  id          String    @id @default(uuid())
+  equipmentId String
+  specKey     String
+  specValue   String
+  unit        String
+
+  equipment Equipment @relation(fields: [equipmentId], references: [id], onDelete: Cascade)
+
+  @@index([equipmentId])
+  @@map("equipmentSpec")
+}
+
+model EquipmentImage {
+  id          String    @id @default(uuid())
+  url         String
+  equipmentId String
+
+  equipment Equipment @relation(fields: [equipmentId], references: [id], onDelete: Cascade)
+
+  @@index([equipmentId])
+  @@map("equipmentImage")
+}
+
+model TechnicalScore {
+  id                          String   @id @default(uuid())
+  cpuScore                    Float
+  ramScore                    Float
+  storageScore                Float
+  gpuScore                    Float
+  reliabilityIndex            Float
+  equipmentId                 String   @unique
+  estimatedRemainingLife      Int
+  economicComparisonIndex     Float
+
+  equipment Equipment @relation(fields: [equipmentId], references: [id], onDelete: Cascade)
+
+  @@map("technicalScore")
+}
+
+model DashboardMetric {
+  id         String   @id @default(uuid())
+  metricType String
+  value      Float
+  date       DateTime @default(now())
+
+  @@map("dashboardMetric")
+}
+
+model Cart {
+  id        String         @id @default(uuid())
+  userId    String
+  status    CartStatusEnum @default(ACTIVE)
+  createdAt DateTime       @default(now())
+
+  user  User       @relation(fields: [userId], references: [id], onDelete: Cascade)
+  items CartItem[]
+
+  @@index([userId])
+  @@map("cart")
+}
+
+model CartItem {
+  id          String   @id @default(uuid())
+  cartId      String
+  equipmentId String?
+  quantity    Int      @default(1)
+  unitPrice   Decimal  @db.Decimal(12, 2)
+
+  cart      Cart       @relation(fields: [cartId], references: [id], onDelete: Cascade)
+  equipment Equipment? @relation(fields: [equipmentId], references: [id], onDelete: SetNull)
+
+  @@index([cartId])
+  @@index([equipmentId])
+  @@map("cartItem")
+}
+
+model Quote {
+  id         String          @id @default(uuid())
+  userId     String
+  amount     Decimal         @db.Decimal(12, 2)
+  createdAt  DateTime        @default(now())
+
+  user     User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  confirms Confirm[]
+  orders   Order[]
+
+  @@index([userId])
+  @@map("quote")
+}
+
+model Confirm {
+  id          String   @id @default(uuid())
+  quoteId     String
+  quantity    Int      @default(1)
+  unitPrice   Decimal  @db.Decimal(12, 2)
+  equipmentId String
+
+  quote     Quote     @relation(fields: [quoteId], references: [id], onDelete: Cascade)
+  equipment Equipment @relation(fields: [equipmentId], references: [id], onDelete: Restrict)
+
+  @@index([quoteId])
+  @@index([equipmentId])
+  @@map("confirm")
+}
+
+model Order {
+  id         String          @id @default(uuid())
+  userId     String
+  quoteId    String?
+  status     OrderStatusEnum @default(PENDING)
+  createdAt  DateTime        @default(now())
+
+  user     User       @relation(fields: [userId], references: [id], onDelete: Cascade)
+  quote    Quote?     @relation(fields: [quoteId], references: [id], onDelete: SetNull)
+  items    OrderItem[]
+  payments Payment[]
+
+  @@index([userId])
+  @@index([quoteId])
+  @@map("order")
+}
+
+model OrderItem {
+  id          String   @id @default(uuid())
+  orderId     String
+  quantity    Int      @default(1)
+  price       Decimal  @db.Decimal(12, 2)
+  equipmentId String
+
+  order     Order     @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  equipment Equipment @relation(fields: [equipmentId], references: [id], onDelete: Restrict)
+
+  @@index([orderId])
+  @@index([equipmentId])
+  @@map("orderItem")
+}
+
+model Payment {
+  id         String            @id @default(uuid())
+  userId     String
+  orderId    String
+  amount     Decimal           @db.Decimal(12, 2)
+  method     PaymentMethodEnum
+  status     PaymentStatusEnum @default(PENDING)
+  createdAt  DateTime          @default(now())
+
+  user  User  @relation(fields: [userId], references: [id], onDelete: Cascade)
+  order Order @relation(fields: [orderId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([orderId])
+  @@map("payment")
+}
+
+model Ticket {
+  id          String             @id @default(uuid())
+  userId      String
+  title       String
+  description String
+  status      TicketStatusEnum   @default(OPEN)
+  priority    TicketPriorityEnum @default(LOW)
+  createdAt   DateTime           @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@map("ticket")
+}
+
+model Notification {
+  id           String              @id @default(uuid())
+  userId       String
+  title        String
+  message      String
+  type         NotificationTypeEnum
+  isRead       Boolean             @default(false)
+  referenceId  String?
+  referenceType String?
+  createdAt    DateTime            @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@map("notification")
+}
+
+model Simulation {
+  id             String        @id @default(uuid())
+  numberOfUsers  Int
+  cpuUsage       Float
+  ramUsage       Float
+  riskLevel      RiskLevelEnum
+  reliabilityIndex Float @map("reliabilityIdx")
+  equipmentId    String
+  userId         String
+  createdAt      DateTime      @default(now())
+
+  equipment Equipment @relation(fields: [equipmentId], references: [id], onDelete: Cascade)
+  user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([equipmentId])
+  @@index([userId])
+  @@map("simulate")
+}

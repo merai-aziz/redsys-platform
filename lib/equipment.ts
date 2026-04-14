@@ -1,4 +1,4 @@
-import { EquipmentTypeEnum } from '@prisma/client'
+export type EquipmentType = 'SERVER' | 'STORAGE' | 'NETWORK' | 'COMPONENT'
 
 export function slugify(value: string) {
   return value
@@ -35,12 +35,12 @@ export type EquipmentSpecInput = {
   unit: string
 }
 
-const EQUIPMENT_TYPES = new Set<EquipmentTypeEnum>(['SERVER', 'STORAGE', 'NETWORK', 'COMPONENT'])
+const EQUIPMENT_TYPES = new Set<EquipmentType>(['SERVER', 'STORAGE', 'NETWORK', 'COMPONENT'])
 
 const SERVER_REQUIRED_SPEC_KEYS = ['cpu', 'ram', 'storage']
 
-export function parseEquipmentType(value: unknown, fallback: EquipmentTypeEnum = 'SERVER'): EquipmentTypeEnum {
-  const candidate = String(value ?? '').toUpperCase() as EquipmentTypeEnum
+export function parseEquipmentType(value: unknown, fallback: EquipmentType = 'SERVER'): EquipmentType {
+  const candidate = String(value ?? '').toUpperCase() as EquipmentType
   return EQUIPMENT_TYPES.has(candidate) ? candidate : fallback
 }
 
@@ -67,7 +67,7 @@ export function parseEquipmentSpecs(value: unknown): EquipmentSpecInput[] {
   return Array.from(deduped.values())
 }
 
-export function validateEquipmentSpecs(equipmentType: EquipmentTypeEnum, specs: EquipmentSpecInput[]) {
+export function validateEquipmentSpecs(equipmentType: EquipmentType, specs: EquipmentSpecInput[]) {
   if (equipmentType !== 'SERVER') return { ok: true as const }
   if (specs.length === 0) {
     return {

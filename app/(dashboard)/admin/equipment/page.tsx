@@ -1,8 +1,8 @@
 'use client'
 
 import { useEffect, useMemo, useRef, useState } from 'react'
+import { Image as ImageIcon, Loader2, Pencil, Plus, RefreshCw, Search, Trash2, Upload, X } from 'lucide-react'
 import { toast } from 'sonner'
-import { Image as ImageIcon, Loader2, Pencil, Plus, RefreshCw, Search, Trash2, Upload } from 'lucide-react'
 
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
@@ -10,80 +10,74 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/com
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
+import {
+  Pagination,
+  PaginationContent,
+  PaginationItem,
+  PaginationLink,
+  PaginationNext,
+  PaginationPrevious,
+} from '@/components/ui/pagination'
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
 
-type EntityType = 'brand' | 'category' | 'subcategory' | 'subsubcategory' | 'equipment'
+type AdminTab = 'model' | 'domain' | 'brand' | 'series'
+type EditorType = AdminTab
 type EditorMode = 'create' | 'edit'
 
-type CatalogTab = EntityType
+interface Domain {
+  id: string
+  label: string
+  code: string
+  slug: string
+  icon?: string | null
+  sortOrder: number
+  isActive: boolean
+}
 
 interface Brand {
   id: string
   name: string
   slug: string
+  description?: string | null
   logo?: string | null
-  description?: string | null
-  isActive: boolean
-  sortOrder: number
+  domainId: string
+  domain?: { id: string; label: string }
+  isActive?: boolean
 }
 
-interface Category {
+interface Series {
   id: string
   name: string
   slug: string
   description?: string | null
-  icon?: string | null
-  photo?: string | null
-  isActive: boolean
-  sortOrder: number
-}
-
-interface SubCategory {
-  id: string
-  name: string
-  slug: string
-  description?: string | null
-  icon?: string | null
-  photo?: string | null
-  categoryId: string
-  isActive: boolean
-  sortOrder: number
-  category?: { id: string; name: string }
-}
-
-interface SubSubCategory {
-  id: string
-  name: string
-  slug: string
-  description?: string | null
-  icon?: string | null
-  photo?: string | null
-  subCategoryId: string
-  isActive: boolean
-  sortOrder: number
-  subCategory?: { id: string; name: string; category?: { id: string; name: string } }
-}
-
-interface EquipmentItem {
-  id: string
-  name: string
-  slug: string
-  reference: string
-  description?: string | null
-  photo?: string | null
-  price?: string | null
-  quantity: number
-  status: 'AVAILABLE' | 'OUT_OF_STOCK'
-  equipmentType: 'SERVER' | 'STORAGE' | 'NETWORK' | 'COMPONENT'
-  specs: Array<{ id?: string; specKey: string; specValue: string; unit: string }>
+  domainId: string
+  brandId: string
+  domain?: { id: string; label: string }
   brand?: { id: string; name: string }
-  category?: { id: string; name: string }
-  subCategory?: { id: string; name: string } | null
-  subSubCategory?: { id: string; name: string } | null
+}
+
+interface EquipmentModelItem {
+  id: string
+  name: string
+  slug: string
+  image?: string | null
+  reference: string
+  shortDescription?: string | null
+  longDescription?: string | null
+  basePrice?: string | number | null
+  stockQty: number
+  status: 'AVAILABLE' | 'OUT_OF_STOCK' | 'DISCONTINUED'
+  condition?: string | null
+  domainId: string
+  brandId: string
+  seriesId: string
+  domain?: { id: string; label: string }
+  brand?: { id: string; name: string }
+  series?: { id: string; name: string }
 }
 
 interface EditorState {
-  type: EntityType
+  type: EditorType
   mode: EditorMode
   id?: string
 }
@@ -91,43 +85,45 @@ interface EditorState {
 const defaultForm = {
   name: '',
   slug: '',
+  code: '',
+  sortOrder: '0',
+  icon: '',
   description: '',
   logo: '',
-  icon: '',
-  photo: '',
-  sortOrder: '0',
-  isActive: true,
-  categoryId: '',
-  subCategoryId: '',
-  reference: '',
-  price: '',
-  quantity: '0',
-  status: 'AVAILABLE' as EquipmentItem['status'],
-  equipmentType: 'SERVER' as EquipmentItem['equipmentType'],
+  domainId: '',
   brandId: '',
-  subSubCategoryId: '',
-  specs: [{ specKey: '', specValue: '', unit: '' }],
+  seriesId: '',
+  reference: '',
+  basePrice: '',
+  stockQty: '0',
+  status: 'AVAILABLE' as EquipmentModelItem['status'],
+  condition: 'NEW',
+  shortDescription: '',
+  longDescription: '',
+  image: '',
 }
 
 export default function AdminEquipmentPage() {
-  const [activeTab, setActiveTab] = useState<CatalogTab>('equipment')
+  const [activeTab, setActiveTab] = useState<AdminTab>('model')
+
+  const [domains, setDomains] = useState<Domain[]>([])
   const [brands, setBrands] = useState<Brand[]>([])
-  const [categories, setCategories] = useState<Category[]>([])
-  const [subcategories, setSubcategories] = useState<SubCategory[]>([])
-  const [subsubcategories, setSubsubcategories] = useState<SubSubCategory[]>([])
-  const [equipment, setEquipment] = useState<EquipmentItem[]>([])
-  const [equipmentLoading, setEquipmentLoading] = useState(true)
+  const [series, setSeries] = useState<Series[]>([])
+  const [models, setModels] = useState<EquipmentModelItem[]>([])
+
+  const [search, setSearch] = useState('')
+  const [filterDomainId, setFilterDomainId] = useState('')
+  const [filterBrandId, setFilterBrandId] = useState('')
+  const [filterSeriesId, setFilterSeriesId] = useState('')
+  const [filterStatus, setFilterStatus] = useState('')
+  const [modelPage, setModelPage] = useState(1)
+
+  const [loading, setLoading] = useState(true)
+  const [refreshing, setRefreshing] = useState(false)
   const [saving, setSaving] = useState(false)
+
   const [editor, setEditor] = useState<EditorState | null>(null)
   const [form, setForm] = useState(defaultForm)
-  const [search, setSearch] = useState('')
-  const [filterBrandId, setFilterBrandId] = useState('')
-  const [filterCategoryId, setFilterCategoryId] = useState('')
-  const [filterSubCategoryId, setFilterSubCategoryId] = useState('')
-  const [filterSubSubCategoryId, setFilterSubSubCategoryId] = useState('')
-  const [filterEquipmentType, setFilterEquipmentType] = useState('')
-  const [filterStatus, setFilterStatus] = useState('')
-  const [refreshing, setRefreshing] = useState(false)
   const photoInputRef = useRef<HTMLInputElement>(null)
 
   async function requestJson<T>(url: string, init?: RequestInit): Promise<T> {
@@ -138,54 +134,53 @@ export default function AdminEquipmentPage() {
         ...(init?.body instanceof FormData ? {} : { 'Content-Type': 'application/json' }),
       },
     })
+
     const data = await res.json().catch(() => ({}))
     if (!res.ok) {
       throw new Error(data.error || 'Erreur serveur')
     }
+
     return data as T
   }
 
-  async function loadStaticData() {
-    const [brandData, categoryData, subcategoryData, subsubData] = await Promise.all([
-      requestJson<{ brands: Brand[] }>('/api/admin/catalog?type=brand'),
-      requestJson<{ categories: Category[] }>('/api/admin/catalog?type=category'),
-      requestJson<{ subcategories: SubCategory[] }>('/api/admin/catalog?type=subcategory'),
-      requestJson<{ subsubcategories: SubSubCategory[] }>('/api/admin/catalog?type=subsubcategory'),
+  async function loadMeta() {
+    const [domainRes, brandRes, seriesRes] = await Promise.all([
+      requestJson<{ domains: Domain[] }>('/api/admin/domain'),
+      requestJson<{ brands: Brand[] }>('/api/admin/brand'),
+      requestJson<{ series: Series[] }>('/api/admin/series'),
     ])
 
-    setBrands(brandData.brands)
-    setCategories(categoryData.categories)
-    setSubcategories(subcategoryData.subcategories)
-    setSubsubcategories(subsubData.subsubcategories)
+    setDomains(domainRes.domains)
+    setBrands(brandRes.brands)
+    setSeries(seriesRes.series)
   }
 
-  async function loadEquipment() {
-    setEquipmentLoading(true)
-    try {
-      const params = new URLSearchParams()
-      params.set('type', 'equipment')
-      if (search.trim()) params.set('search', search.trim())
-      if (filterBrandId) params.set('brandId', filterBrandId)
-      if (filterCategoryId) params.set('categoryId', filterCategoryId)
-      if (filterSubCategoryId) params.set('subCategoryId', filterSubCategoryId)
-      if (filterSubSubCategoryId) params.set('subSubCategoryId', filterSubSubCategoryId)
-      if (filterEquipmentType) params.set('equipmentType', filterEquipmentType)
-      if (filterStatus) params.set('status', filterStatus)
+  async function loadModels() {
+    const params = new URLSearchParams()
+    if (search.trim()) params.set('search', search.trim())
+    if (filterDomainId) params.set('domainId', filterDomainId)
+    if (filterBrandId) params.set('brandId', filterBrandId)
+    if (filterSeriesId) params.set('seriesId', filterSeriesId)
 
-      const data = await requestJson<{ equipment: EquipmentItem[] }>(`/api/admin/catalog?${params.toString()}`)
-      setEquipment(data.equipment)
-    } catch (error) {
-      toast.error(error instanceof Error ? error.message : 'Erreur de chargement')
-    } finally {
-      setEquipmentLoading(false)
-    }
+    const data = await requestJson<{ models: EquipmentModelItem[] }>(`/api/admin/model?${params.toString()}`)
+
+    setModels(
+      data.models.filter((item) => {
+        if (!filterStatus) return true
+        return item.status === filterStatus
+      })
+    )
   }
 
   async function bootstrap() {
     setRefreshing(true)
+    setLoading(true)
     try {
-      await Promise.all([loadStaticData(), loadEquipment()])
+      await Promise.all([loadMeta(), loadModels()])
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : 'Chargement impossible')
     } finally {
+      setLoading(false)
       setRefreshing(false)
     }
   }
@@ -197,89 +192,68 @@ export default function AdminEquipmentPage() {
 
   useEffect(() => {
     const timer = window.setTimeout(() => {
-      void loadEquipment()
-    }, 250)
+      void loadModels().catch((error: unknown) => {
+        toast.error(error instanceof Error ? error.message : 'Chargement impossible')
+      })
+    }, 300)
 
     return () => window.clearTimeout(timer)
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [search, filterBrandId, filterCategoryId, filterSubCategoryId, filterSubSubCategoryId, filterEquipmentType, filterStatus])
+  }, [search, filterDomainId, filterBrandId, filterSeriesId, filterStatus])
 
-  function openEditor(type: EntityType, mode: EditorMode, item?: Record<string, unknown>) {
+  function openEditor(type: EditorType, mode: EditorMode, item?: Record<string, unknown>) {
     setEditor({ type, mode, id: item?.id as string | undefined })
+
+    if (type === 'domain') {
+      setForm({
+        ...defaultForm,
+        name: (item?.label as string) || '',
+        slug: (item?.slug as string) || '',
+        code: (item?.code as string) || '',
+        icon: (item?.icon as string) || '',
+        sortOrder: String((item?.sortOrder as number) ?? 0),
+      })
+      return
+    }
+
+    if (type === 'brand') {
+      setForm({
+        ...defaultForm,
+        name: (item?.name as string) || '',
+        slug: (item?.slug as string) || '',
+        description: (item?.description as string) || '',
+        logo: (item?.logo as string) || '',
+        domainId: (item?.domainId as string) || (item?.domain as { id: string } | undefined)?.id || '',
+      })
+      return
+    }
+
+    if (type === 'series') {
+      setForm({
+        ...defaultForm,
+        name: (item?.name as string) || '',
+        slug: (item?.slug as string) || '',
+        description: (item?.description as string) || '',
+        domainId: (item?.domainId as string) || (item?.domain as { id: string } | undefined)?.id || '',
+        brandId: (item?.brandId as string) || (item?.brand as { id: string } | undefined)?.id || '',
+      })
+      return
+    }
+
     setForm({
       ...defaultForm,
-      ...(type === 'brand'
-        ? {
-            name: (item?.name as string) || '',
-            slug: (item?.slug as string) || '',
-            description: (item?.description as string) || '',
-            logo: (item?.logo as string) || '',
-            sortOrder: String((item?.sortOrder as number) ?? 0),
-            isActive: Boolean(item?.isActive ?? true),
-          }
-        : {}),
-      ...(type === 'category'
-        ? {
-            name: (item?.name as string) || '',
-            slug: (item?.slug as string) || '',
-            description: (item?.description as string) || '',
-            icon: (item?.icon as string) || '',
-            photo: (item?.photo as string) || '',
-            sortOrder: String((item?.sortOrder as number) ?? 0),
-            isActive: Boolean(item?.isActive ?? true),
-          }
-        : {}),
-      ...(type === 'subcategory'
-        ? {
-            name: (item?.name as string) || '',
-            slug: (item?.slug as string) || '',
-            description: (item?.description as string) || '',
-            icon: (item?.icon as string) || '',
-            photo: (item?.photo as string) || '',
-            categoryId: (item?.categoryId as string) || '',
-            sortOrder: String((item?.sortOrder as number) ?? 0),
-            isActive: Boolean(item?.isActive ?? true),
-          }
-        : {}),
-      ...(type === 'subsubcategory'
-        ? {
-            name: (item?.name as string) || '',
-            slug: (item?.slug as string) || '',
-            description: (item?.description as string) || '',
-            icon: (item?.icon as string) || '',
-            photo: (item?.photo as string) || '',
-            subCategoryId: (item?.subCategoryId as string) || '',
-            sortOrder: String((item?.sortOrder as number) ?? 0),
-            isActive: Boolean(item?.isActive ?? true),
-          }
-        : {}),
-      ...(type === 'equipment'
-        ? {
-            name: (item?.name as string) || '',
-            slug: (item?.slug as string) || '',
-            reference: (item?.reference as string) || '',
-            description: (item?.description as string) || '',
-            photo: (item?.photo as string) || '',
-            price: (item?.price as string) || '',
-            quantity: String((item?.quantity as number) ?? 0),
-            status: (item?.status as EquipmentItem['status']) || 'AVAILABLE',
-            equipmentType: (item?.equipmentType as EquipmentItem['equipmentType']) || 'SERVER',
-            brandId: (item?.brandId as string) || (item?.brand as { id: string } | undefined)?.id || '',
-            categoryId: (item?.categoryId as string) || (item?.category as { id: string } | undefined)?.id || '',
-            subCategoryId: (item?.subCategoryId as string) || (item?.subCategory as { id: string } | undefined)?.id || '',
-            subSubCategoryId:
-              (item?.subSubCategoryId as string) || (item?.subSubCategory as { id: string } | undefined)?.id || '',
-            specs:
-              Array.isArray(item?.specs) && item.specs.length > 0
-                ? (item.specs as Array<{ id?: string; specKey: string; specValue: string; unit: string }>).map((spec) => ({
-                    id: spec.id,
-                    specKey: spec.specKey || '',
-                    specValue: spec.specValue || '',
-                    unit: spec.unit || '',
-                  }))
-                : [{ specKey: '', specValue: '', unit: '' }],
-          }
-        : {}),
+      name: (item?.name as string) || '',
+      slug: (item?.slug as string) || '',
+      image: (item?.image as string) || '',
+      reference: (item?.reference as string) || '',
+      shortDescription: (item?.shortDescription as string) || '',
+      longDescription: (item?.longDescription as string) || '',
+      basePrice: String((item?.basePrice as string | number | null) ?? ''),
+      stockQty: String((item?.stockQty as number) ?? 0),
+      status: (item?.status as EquipmentModelItem['status']) || 'AVAILABLE',
+      condition: (item?.condition as string) || 'NEW',
+      domainId: (item?.domainId as string) || (item?.domain as { id: string } | undefined)?.id || '',
+      brandId: (item?.brandId as string) || (item?.brand as { id: string } | undefined)?.id || '',
+      seriesId: (item?.seriesId as string) || (item?.series as { id: string } | undefined)?.id || '',
     })
   }
 
@@ -291,10 +265,33 @@ export default function AdminEquipmentPage() {
   async function handlePhotoUpload(file: File) {
     const body = new FormData()
     body.append('photo', file)
+
     const res = await fetch('/api/admin/equipment/photo', { method: 'POST', body })
     const data = await res.json()
     if (!res.ok) throw new Error(data.error || 'Upload impossible')
-    setForm((prev) => ({ ...prev, photo: data.photo }))
+
+    setForm((prev) => ({ ...prev, image: data.photo }))
+  }
+
+  async function handleDelete(type: EditorType, id: string) {
+    if (!window.confirm('Confirmer la suppression ?')) return
+
+    try {
+      if (type === 'domain') {
+        await requestJson(`/api/admin/domain/${id}`, { method: 'DELETE' })
+      } else if (type === 'brand') {
+        await requestJson(`/api/admin/brand/${id}`, { method: 'DELETE' })
+      } else if (type === 'series') {
+        await requestJson(`/api/admin/series/${id}`, { method: 'DELETE' })
+      } else {
+        await requestJson(`/api/admin/model/${id}`, { method: 'DELETE' })
+      }
+
+      toast.success('Suppression effectuee')
+      await bootstrap()
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : 'Suppression impossible')
+    }
   }
 
   async function handleSave() {
@@ -305,115 +302,89 @@ export default function AdminEquipmentPage() {
       return
     }
 
-    if (editor.type === 'subcategory' && !form.categoryId) {
-      toast.error('Choisissez une categorie')
+    if (editor.type === 'brand' && !form.domainId) {
+      toast.error('Choisissez un domaine')
       return
     }
 
-    if (editor.type === 'subsubcategory' && !form.subCategoryId) {
-      toast.error('Choisissez une sous-categorie')
+    if (editor.type === 'series' && (!form.domainId || !form.brandId)) {
+      toast.error('Choisissez domaine et marque')
       return
     }
 
-    if (editor.type === 'equipment') {
-      if (!form.reference.trim() || !form.brandId || !form.categoryId || !form.subCategoryId) {
-        toast.error('Champs equipment obligatoires manquants')
-        return
-      }
-
-      const cleanedSpecs = form.specs
-        .map((spec) => ({
-          specKey: spec.specKey.trim(),
-          specValue: spec.specValue.trim(),
-          unit: spec.unit.trim(),
-        }))
-        .filter((spec) => spec.specKey && spec.specValue)
-
-      if (form.equipmentType === 'SERVER') {
-        const serverKeys = new Set(cleanedSpecs.map((spec) => spec.specKey.toLowerCase()))
-        const missing = ['cpu', 'ram', 'storage'].filter((key) => !serverKeys.has(key))
-        if (missing.length > 0) {
-          toast.error(`Specs SERVER manquantes: ${missing.join(', ')}`)
-          return
-        }
-      }
+    if (editor.type === 'model' && (!form.domainId || !form.brandId || !form.seriesId || !form.reference.trim())) {
+      toast.error('Model: domaine, marque, serie et reference sont obligatoires')
+      return
     }
 
     setSaving(true)
+
     try {
-      const type = editor.type
-      const url = editor.mode === 'create' ? `/api/admin/catalog?type=${type}` : `/api/admin/catalog/${editor.id}?type=${type}`
-      const method = editor.mode === 'create' ? 'POST' : 'PUT'
+      if (editor.type === 'domain') {
+        const url = editor.mode === 'create' ? '/api/admin/domain' : `/api/admin/domain/${editor.id}`
+        const method = editor.mode === 'create' ? 'POST' : 'PUT'
 
-      const payload =
-        type === 'brand'
-          ? {
-              name: form.name,
-              slug: form.slug,
-              description: form.description || null,
-              logo: form.logo || null,
-              sortOrder: form.sortOrder,
-              isActive: form.isActive,
-            }
-          : type === 'category'
-            ? {
-                name: form.name,
-                slug: form.slug,
-                description: form.description || null,
-                icon: form.icon || null,
-                photo: form.photo || null,
-                sortOrder: form.sortOrder,
-                isActive: form.isActive,
-              }
-            : type === 'subcategory'
-              ? {
-                  name: form.name,
-                  slug: form.slug,
-                  description: form.description || null,
-                  icon: form.icon || null,
-                  photo: form.photo || null,
-                  categoryId: form.categoryId,
-                  sortOrder: form.sortOrder,
-                  isActive: form.isActive,
-                }
-              : type === 'subsubcategory'
-                ? {
-                    name: form.name,
-                    slug: form.slug,
-                    description: form.description || null,
-                    icon: form.icon || null,
-                    photo: form.photo || null,
-                    subCategoryId: form.subCategoryId,
-                    sortOrder: form.sortOrder,
-                    isActive: form.isActive,
-                  }
-                : {
-                    name: form.name,
-                    slug: form.slug,
-                    reference: form.reference,
-                    description: form.description || null,
-                    photo: form.photo || null,
-                    price: form.price,
-                    quantity: form.quantity,
-                    status: form.status,
-                    equipmentType: form.equipmentType,
-                    brandId: form.brandId,
-                    categoryId: form.categoryId,
-                    subCategoryId: form.subCategoryId,
-                    subSubCategoryId: form.subSubCategoryId || null,
-                    specs: form.specs
-                      .map((spec) => ({
-                        specKey: spec.specKey.trim(),
-                        specValue: spec.specValue.trim(),
-                        unit: spec.unit.trim(),
-                      }))
-                      .filter((spec) => spec.specKey && spec.specValue),
-                  }
+        await requestJson(url, {
+          method,
+          body: JSON.stringify({
+            label: form.name,
+            code: form.code || undefined,
+            slug: form.slug || undefined,
+            icon: form.icon || null,
+            sortOrder: Number(form.sortOrder) || 0,
+          }),
+        })
+      } else if (editor.type === 'brand') {
+        const url = editor.mode === 'create' ? '/api/admin/brand' : `/api/admin/brand/${editor.id}`
+        const method = editor.mode === 'create' ? 'POST' : 'PUT'
 
-      await requestJson(url, {
-        method,
-        body: JSON.stringify(payload),
-      })
+        await requestJson(url, {
+          method,
+          body: JSON.stringify({
+            name: form.name,
+            slug: form.slug || undefined,
+            description: form.description || null,
+            logo: form.logo || null,
+            domainId: form.domainId,
+          }),
+        })
+      } else if (editor.type === 'series') {
+        const url = editor.mode === 'create' ? '/api/admin/series' : `/api/admin/series/${editor.id}`
+        const method = editor.mode === 'create' ? 'POST' : 'PUT'
+
+        await requestJson(url, {
+          method,
+          body: JSON.stringify({
+            name: form.name,
+            slug: form.slug || undefined,
+            description: form.description || null,
+            domainId: form.domainId,
+            brandId: form.brandId,
+          }),
+        })
+      } else {
+        const url = editor.mode === 'create' ? '/api/admin/model' : `/api/admin/model/${editor.id}`
+        const method = editor.mode === 'create' ? 'POST' : 'PUT'
+
+        await requestJson(url, {
+          method,
+          body: JSON.stringify({
+            name: form.name,
+            slug: form.slug || undefined,
+            reference: form.reference,
+            shortDescription: form.shortDescription || null,
+            longDescription: form.longDescription || null,
+            basePrice: form.basePrice ? Number(form.basePrice) : 0,
+            stockQty: Number(form.stockQty) || 0,
+            status: form.status,
+            condition: form.condition || null,
+            image: form.image || null,
+            domainId: form.domainId,
+            brandId: form.brandId,
+            seriesId: form.seriesId,
+          }),
+        })
+      }
 
       toast.success(editor.mode === 'create' ? 'Element cree' : 'Element mis a jour')
       closeEditor()
@@ -425,41 +396,41 @@ export default function AdminEquipmentPage() {
     }
   }
 
-  async function handleDelete(type: EntityType, id: string) {
-    if (!confirm('Confirmer la suppression ?')) return
-    try {
-      await requestJson(`/api/admin/catalog/${id}?type=${type}`, { method: 'DELETE' })
-      toast.success('Suppression effectuee')
-      await bootstrap()
-    } catch (error) {
-      toast.error(error instanceof Error ? error.message : 'Suppression impossible')
-    }
-  }
+  const stats = useMemo(() => {
+    const available = models.filter((m) => m.status === 'AVAILABLE').length
+    const out = models.filter((m) => m.status === 'OUT_OF_STOCK').length
+    const totalStock = models.reduce((sum, m) => sum + (m.stockQty || 0), 0)
+    return { total: models.length, available, out, totalStock }
+  }, [models])
 
-  const categoryOptions = useMemo(() => categories, [categories])
+  const filteredBrands = brands.filter((item) => !filterDomainId || item.domainId === filterDomainId)
+  const filteredSeries = series.filter((item) => (!filterDomainId || item.domainId === filterDomainId) && (!filterBrandId || item.brandId === filterBrandId))
 
-  const equipmentStats = {
-    total: equipment.length,
-    available: equipment.filter((item) => item.status === 'AVAILABLE').length,
-    outOfStock: equipment.filter((item) => item.status === 'OUT_OF_STOCK').length,
-    server: equipment.filter((item) => item.equipmentType === 'SERVER').length,
-  }
+  const perPage = 12
+  const totalModelPages = Math.max(1, Math.ceil(models.length / perPage))
+  const pagedModels = useMemo(() => {
+    const start = (modelPage - 1) * perPage
+    return models.slice(start, start + perPage)
+  }, [modelPage, models])
+
+  const editorBrands = brands.filter((item) => !form.domainId || item.domainId === form.domainId)
+  const editorSeries = series.filter((item) => (!form.domainId || item.domainId === form.domainId) && (!form.brandId || item.brandId === form.brandId))
 
   return (
     <div className="space-y-5">
       <div className="flex flex-col gap-3 lg:flex-row lg:items-end lg:justify-between">
         <div>
-          <h1 className="text-2xl font-bold text-slate-900">Gestion des equipements</h1>
+          <h1 className="text-2xl font-bold text-slate-900">Gestion equipement</h1>
           <p className="mt-1 max-w-2xl text-sm text-slate-500">
-            CRUD complet pour les equipements, marques, categories et sous-categories avec filtrage avance.
+            Structure cible: Domain, Brand, Series, Model.
           </p>
         </div>
-        <div className="flex flex-wrap gap-2">
-          <Button variant="outline" onClick={bootstrap} className="border-slate-200 bg-white">
+        <div className="flex gap-2">
+          <Button variant="outline" className="border-slate-200 bg-white" onClick={() => void bootstrap()}>
             {refreshing ? <Loader2 className="h-4 w-4 animate-spin" /> : <RefreshCw className="h-4 w-4" />}
             Actualiser
           </Button>
-          <Button onClick={() => openEditor(activeTab, 'create')} className="bg-sky-600 text-white hover:bg-sky-700">
+          <Button className="bg-sky-600 text-white hover:bg-sky-700" onClick={() => openEditor(activeTab, 'create')}>
             <Plus className="h-4 w-4" />
             Ajouter
           </Button>
@@ -467,39 +438,18 @@ export default function AdminEquipmentPage() {
       </div>
 
       <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
-        <Card className="border-slate-200 bg-white shadow-sm">
-          <CardContent className="py-4">
-            <p className="text-xs uppercase tracking-wide text-slate-500">Equipements</p>
-            <p className="mt-1 text-3xl font-bold text-slate-900">{equipmentStats.total}</p>
-          </CardContent>
-        </Card>
-        <Card className="border-slate-200 bg-white shadow-sm">
-          <CardContent className="py-4">
-            <p className="text-xs uppercase tracking-wide text-slate-500">Disponibles</p>
-            <p className="mt-1 text-3xl font-bold text-emerald-600">{equipmentStats.available}</p>
-          </CardContent>
-        </Card>
-        <Card className="border-slate-200 bg-white shadow-sm">
-          <CardContent className="py-4">
-            <p className="text-xs uppercase tracking-wide text-slate-500">Type SERVER</p>
-            <p className="mt-1 text-3xl font-bold text-sky-600">{equipmentStats.server}</p>
-          </CardContent>
-        </Card>
-        <Card className="border-slate-200 bg-white shadow-sm">
-          <CardContent className="py-4">
-            <p className="text-xs uppercase tracking-wide text-slate-500">Rupture</p>
-            <p className="mt-1 text-3xl font-bold text-rose-600">{equipmentStats.outOfStock}</p>
-          </CardContent>
-        </Card>
+        <StatCard title="Models" value={stats.total} tone="text-slate-900" />
+        <StatCard title="Disponibles" value={stats.available} tone="text-emerald-600" />
+        <StatCard title="Rupture" value={stats.out} tone="text-rose-600" />
+        <StatCard title="Stock total" value={stats.totalStock} tone="text-sky-600" />
       </div>
 
       <div className="flex flex-wrap gap-2">
         {([
-          ['equipment', 'Equipements'],
+          ['model', 'Models'],
+          ['domain', 'Domaines'],
           ['brand', 'Marques'],
-          ['category', 'Categories'],
-          ['subcategory', 'Sous-categories'],
-          ['subsubcategory', 'Sous-sous-categories'],
+          ['series', 'Series'],
         ] as const).map(([key, label]) => (
           <Button
             key={key}
@@ -512,60 +462,87 @@ export default function AdminEquipmentPage() {
         ))}
       </div>
 
-      {activeTab === 'equipment' ? (
+      {activeTab === 'model' ? (
         <Card className="border-slate-200 bg-white shadow-sm">
           <CardHeader>
-            <CardTitle>Equipements</CardTitle>
-            <CardDescription>Filtrage par marque, categorie, sous-categorie et statut.</CardDescription>
+            <CardTitle>Models</CardTitle>
+            <CardDescription>Gestion des produits techniques sur le schema Renewtech.</CardDescription>
           </CardHeader>
           <CardContent className="space-y-4">
-            <div className="grid gap-3 lg:grid-cols-7">
+            <div className="grid gap-3 lg:grid-cols-6">
               <div className="relative lg:col-span-2">
                 <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
-                <Input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Rechercher" className="h-10 border-slate-200 bg-slate-50 pl-9" />
+                <Input
+                  value={search}
+                  onChange={(e) => {
+                    setSearch(e.target.value)
+                    setModelPage(1)
+                  }}
+                  placeholder="Rechercher"
+                  className="h-10 border-slate-200 bg-slate-50 pl-9"
+                />
               </div>
-              <select value={filterBrandId} onChange={(e) => setFilterBrandId(e.target.value)} className="h-10 rounded-lg border border-slate-200 bg-slate-50 px-3 text-sm">
+              <select
+                value={filterDomainId}
+                onChange={(e) => {
+                  setFilterDomainId(e.target.value)
+                  setFilterBrandId('')
+                  setFilterSeriesId('')
+                  setModelPage(1)
+                }}
+                className="h-10 rounded-lg border border-slate-200 bg-slate-50 px-3 text-sm"
+              >
+                <option value="">Tous les domaines</option>
+                {domains.map((item) => (
+                  <option key={item.id} value={item.id}>{item.label}</option>
+                ))}
+              </select>
+              <select
+                value={filterBrandId}
+                onChange={(e) => {
+                  setFilterBrandId(e.target.value)
+                  setFilterSeriesId('')
+                  setModelPage(1)
+                }}
+                className="h-10 rounded-lg border border-slate-200 bg-slate-50 px-3 text-sm"
+              >
                 <option value="">Toutes les marques</option>
-                {brands.map((item) => (
+                {filteredBrands.map((item) => (
                   <option key={item.id} value={item.id}>{item.name}</option>
                 ))}
               </select>
-              <select value={filterCategoryId} onChange={(e) => setFilterCategoryId(e.target.value)} className="h-10 rounded-lg border border-slate-200 bg-slate-50 px-3 text-sm">
-                <option value="">Toutes les categories</option>
-                {categories.map((item) => (
+              <select
+                value={filterSeriesId}
+                onChange={(e) => {
+                  setFilterSeriesId(e.target.value)
+                  setModelPage(1)
+                }}
+                className="h-10 rounded-lg border border-slate-200 bg-slate-50 px-3 text-sm"
+              >
+                <option value="">Toutes les series</option>
+                {filteredSeries.map((item) => (
                   <option key={item.id} value={item.id}>{item.name}</option>
                 ))}
               </select>
-              <select value={filterSubCategoryId} onChange={(e) => setFilterSubCategoryId(e.target.value)} className="h-10 rounded-lg border border-slate-200 bg-slate-50 px-3 text-sm">
-                <option value="">Toutes les sous-categories</option>
-                {subcategories.filter((item) => !filterCategoryId || item.categoryId === filterCategoryId).map((item) => (
-                  <option key={item.id} value={item.id}>{item.name}</option>
-                ))}
-              </select>
-              <select value={filterSubSubCategoryId} onChange={(e) => setFilterSubSubCategoryId(e.target.value)} className="h-10 rounded-lg border border-slate-200 bg-slate-50 px-3 text-sm">
-                <option value="">Toutes les sous-sous-categories</option>
-                {subsubcategories.filter((item) => !filterSubCategoryId || item.subCategoryId === filterSubCategoryId).map((item) => (
-                  <option key={item.id} value={item.id}>{item.name}</option>
-                ))}
-              </select>
-              <select value={filterEquipmentType} onChange={(e) => setFilterEquipmentType(e.target.value)} className="h-10 rounded-lg border border-slate-200 bg-slate-50 px-3 text-sm">
-                <option value="">Tous les types</option>
-                <option value="SERVER">SERVER</option>
-                <option value="STORAGE">STORAGE</option>
-                <option value="NETWORK">NETWORK</option>
-                <option value="COMPONENT">COMPONENT</option>
-              </select>
-              <select value={filterStatus} onChange={(e) => setFilterStatus(e.target.value)} className="h-10 rounded-lg border border-slate-200 bg-slate-50 px-3 text-sm">
+              <select
+                value={filterStatus}
+                onChange={(e) => {
+                  setFilterStatus(e.target.value)
+                  setModelPage(1)
+                }}
+                className="h-10 rounded-lg border border-slate-200 bg-slate-50 px-3 text-sm"
+              >
                 <option value="">Tous les statuts</option>
-                <option value="AVAILABLE">Available</option>
-                <option value="OUT_OF_STOCK">Out of stock</option>
+                <option value="AVAILABLE">AVAILABLE</option>
+                <option value="OUT_OF_STOCK">OUT_OF_STOCK</option>
+                <option value="DISCONTINUED">DISCONTINUED</option>
               </select>
             </div>
 
             <Table>
               <TableHeader>
                 <TableRow>
-                  <TableHead>Photo</TableHead>
+                  <TableHead>Image</TableHead>
                   <TableHead>Nom</TableHead>
                   <TableHead>Reference</TableHead>
                   <TableHead>Classification</TableHead>
@@ -575,71 +552,52 @@ export default function AdminEquipmentPage() {
                 </TableRow>
               </TableHeader>
               <TableBody>
-                {equipmentLoading ? (
+                {loading ? (
                   <TableRow>
                     <TableCell colSpan={7} className="py-10 text-center text-slate-500">
                       <Loader2 className="mx-auto h-5 w-5 animate-spin text-sky-600" />
                     </TableCell>
                   </TableRow>
-                ) : equipment.length === 0 ? (
+                ) : models.length === 0 ? (
                   <TableRow>
-                    <TableCell colSpan={7} className="py-10 text-center text-slate-500">
-                      Aucun equipement trouve.
-                    </TableCell>
+                    <TableCell colSpan={7} className="py-10 text-center text-slate-500">Aucun model.</TableCell>
                   </TableRow>
                 ) : (
-                  equipment.map((item) => (
+                  pagedModels.map((item) => (
                     <TableRow key={item.id}>
                       <TableCell>
-                        {item.photo ? (
-                          <img src={item.photo} alt={item.name} className="h-12 w-12 rounded-lg object-cover ring-1 ring-slate-200" />
+                        {item.image ? (
+                          <img src={item.image} alt={item.name} className="h-11 w-11 rounded-lg object-cover ring-1 ring-slate-200" />
                         ) : (
-                          <div className="flex h-12 w-12 items-center justify-center rounded-lg bg-slate-100 text-slate-400">
+                          <div className="flex h-11 w-11 items-center justify-center rounded-lg bg-slate-100 text-slate-400">
                             <ImageIcon className="h-4 w-4" />
                           </div>
                         )}
                       </TableCell>
                       <TableCell>
-                        <div>
-                          <p className="font-semibold text-slate-900">{item.name}</p>
-                          <p className="text-xs text-slate-500">{item.description || 'Aucune description'}</p>
-                        </div>
+                        <p className="font-semibold text-slate-900">{item.name}</p>
+                        <p className="text-xs text-slate-500">{item.shortDescription || 'Aucune description'}</p>
                       </TableCell>
                       <TableCell className="text-slate-600">{item.reference}</TableCell>
                       <TableCell>
                         <div className="text-sm text-slate-900">{item.brand?.name || 'Marque inconnue'}</div>
-                        <div className="text-xs text-slate-500">
-                          {[item.category?.name, item.subCategory?.name, item.subSubCategory?.name]
-                            .filter(Boolean)
-                            .join(' / ') || 'Classification non definie'}
-                        </div>
+                        <div className="text-xs text-slate-500">{[item.domain?.label, item.series?.name].filter(Boolean).join(' / ') || 'Classification non definie'}</div>
                       </TableCell>
                       <TableCell>
-                        <div className="text-sm font-semibold text-slate-900">{item.price ? `${item.price} DT` : 'N.C.'}</div>
-                        <div className="text-xs text-slate-500">Stock: {item.quantity}</div>
+                        <div className="text-sm font-semibold text-slate-900">{item.basePrice ? `${item.basePrice} DT` : 'N.C.'}</div>
+                        <div className="text-xs text-slate-500">Stock: {item.stockQty}</div>
                       </TableCell>
                       <TableCell>
-                        <div className="flex flex-col gap-1">
-                          <Badge
-                            className={
-                              item.status === 'AVAILABLE'
-                                ? 'bg-emerald-100 text-emerald-700 hover:bg-emerald-100'
-                                : item.status === 'OUT_OF_STOCK'
-                                  ? 'bg-amber-100 text-amber-700 hover:bg-amber-100'
-                                  : 'bg-slate-100 text-slate-700 hover:bg-slate-100'
-                            }
-                          >
-                            {item.status}
-                          </Badge>
-                          <Badge className="bg-sky-100 text-sky-700 hover:bg-sky-100">{item.equipmentType}</Badge>
-                        </div>
+                        <Badge className={item.status === 'AVAILABLE' ? 'bg-emerald-100 text-emerald-700 hover:bg-emerald-100' : item.status === 'OUT_OF_STOCK' ? 'bg-amber-100 text-amber-700 hover:bg-amber-100' : 'bg-rose-100 text-rose-700 hover:bg-rose-100'}>
+                          {item.status}
+                        </Badge>
                       </TableCell>
                       <TableCell>
                         <div className="flex justify-end gap-2">
-                          <Button variant="outline" size="icon-sm" onClick={() => openEditor('equipment', 'edit', item)}>
+                          <Button variant="outline" size="icon-sm" onClick={() => openEditor('model', 'edit', item as unknown as Record<string, unknown>)}>
                             <Pencil className="h-3.5 w-3.5" />
                           </Button>
-                          <Button variant="outline" size="icon-sm" className="text-rose-600" onClick={() => handleDelete('equipment', item.id)}>
+                          <Button variant="outline" size="icon-sm" className="text-rose-600" onClick={() => void handleDelete('model', item.id)}>
                             <Trash2 className="h-3.5 w-3.5" />
                           </Button>
                         </div>
@@ -649,75 +607,100 @@ export default function AdminEquipmentPage() {
                 )}
               </TableBody>
             </Table>
+
+            <div className="mt-5">
+              <Pagination>
+                <PaginationContent>
+                  <PaginationItem>
+                    <PaginationPrevious
+                      href="#"
+                      text="Precedent"
+                      onClick={(event) => {
+                        event.preventDefault()
+                        setModelPage((prev) => Math.max(1, prev - 1))
+                      }}
+                    />
+                  </PaginationItem>
+
+                  {Array.from({ length: totalModelPages }, (_, index) => index + 1)
+                    .slice(Math.max(0, modelPage - 3), Math.min(totalModelPages, modelPage + 2))
+                    .map((p) => (
+                      <PaginationItem key={p}>
+                        <PaginationLink
+                          href="#"
+                          isActive={p === modelPage}
+                          onClick={(event) => {
+                            event.preventDefault()
+                            setModelPage(p)
+                          }}
+                        >
+                          {p}
+                        </PaginationLink>
+                      </PaginationItem>
+                    ))}
+
+                  <PaginationItem>
+                    <PaginationNext
+                      href="#"
+                      text="Suivant"
+                      onClick={(event) => {
+                        event.preventDefault()
+                        setModelPage((prev) => Math.min(totalModelPages, prev + 1))
+                      }}
+                    />
+                  </PaginationItem>
+                </PaginationContent>
+              </Pagination>
+            </div>
           </CardContent>
         </Card>
+      ) : activeTab === 'domain' ? (
+        <SimpleEntityTable
+          title="Domaines"
+          description="Niveau principal du catalogue technique."
+          rows={domains.map((item) => ({
+            id: item.id,
+            title: item.label,
+            subtitle: `${item.code} | ${item.slug}`,
+            meta: item.icon || 'Sans icone',
+            status: item.isActive ? 'Actif' : 'Inactif',
+            raw: item,
+          }))}
+          onAdd={() => openEditor('domain', 'create')}
+          onEdit={(item) => openEditor('domain', 'edit', item as unknown as Record<string, unknown>)}
+          onDelete={(id) => void handleDelete('domain', id)}
+        />
       ) : activeTab === 'brand' ? (
         <SimpleEntityTable
           title="Marques"
-          description="Gestion des marques de votre catalogue."
-          entity="brand"
+          description="Chaque marque est rattachee a un domaine."
           rows={brands.map((item) => ({
             id: item.id,
             title: item.name,
-            subtitle: item.description || 'Aucune description',
-            meta: item.logo || 'Sans logo',
-            status: item.isActive ? 'Actif' : 'Inactif',
+            subtitle: item.domain?.label || 'Sans domaine',
+            meta: item.logo || item.description || 'Sans media',
+            status: item.isActive === false ? 'Inactif' : 'Actif',
             raw: item,
           }))}
           onAdd={() => openEditor('brand', 'create')}
           onEdit={(item) => openEditor('brand', 'edit', item as unknown as Record<string, unknown>)}
-          onDelete={(id) => handleDelete('brand', id)}
-        />
-      ) : activeTab === 'category' ? (
-        <SimpleEntityTable
-          title="Categories"
-          description="Gestion des categories racines."
-          entity="category"
-          rows={categories.map((item) => ({
-            id: item.id,
-            title: item.name,
-            subtitle: item.description || 'Aucune description',
-            meta: item.icon || item.photo || 'Sans media',
-            status: item.isActive ? 'Actif' : 'Inactif',
-            raw: item,
-          }))}
-          onAdd={() => openEditor('category', 'create')}
-          onEdit={(item) => openEditor('category', 'edit', item as unknown as Record<string, unknown>)}
-          onDelete={(id) => handleDelete('category', id)}
-        />
-      ) : activeTab === 'subcategory' ? (
-        <SimpleEntityTable
-          title="Sous-categories"
-          description="Chaque sous-categorie est rattachee a une categorie."
-          entity="subcategory"
-          rows={subcategories.map((item) => ({
-            id: item.id,
-            title: item.name,
-            subtitle: item.category?.name || 'Sans categorie',
-            meta: item.photo || item.icon || 'Sans media',
-            status: item.isActive ? 'Actif' : 'Inactif',
-            raw: item,
-          }))}
-          onAdd={() => openEditor('subcategory', 'create')}
-          onEdit={(item) => openEditor('subcategory', 'edit', item as unknown as Record<string, unknown>)}
-          onDelete={(id) => handleDelete('subcategory', id)}
+          onDelete={(id) => void handleDelete('brand', id)}
         />
       ) : (
         <SimpleEntityTable
-          title="Sous-sous-categories"
-          description="Dernier niveau de classification du catalogue."
-          entity="subsubcategory"
-          rows={subsubcategories.map((item) => ({
+          title="Series"
+          description="Chaque serie appartient a une marque et a un domaine."
+          rows={series.map((item) => ({
             id: item.id,
             title: item.name,
-            subtitle: item.subCategory?.name || 'Sans sous-categorie',
-            meta: item.photo || item.icon || 'Sans media',
-            status: item.isActive ? 'Actif' : 'Inactif',
+            subtitle: `${item.domain?.label || 'Sans domaine'} / ${item.brand?.name || 'Sans marque'}`,
+            meta: item.description || 'Sans description',
+            status: 'Actif',
             raw: item,
           }))}
-          onAdd={() => openEditor('subsubcategory', 'create')}
-          onEdit={(item) => openEditor('subsubcategory', 'edit', item as unknown as Record<string, unknown>)}
-          onDelete={(id) => handleDelete('subsubcategory', id)}
+          onAdd={() => openEditor('series', 'create')}
+          onEdit={(item) => openEditor('series', 'edit', item as unknown as Record<string, unknown>)}
+          onDelete={(id) => void handleDelete('series', id)}
         />
       )}
 
@@ -726,19 +709,9 @@ export default function AdminEquipmentPage() {
           <DialogHeader>
             <DialogTitle>
               {editor?.mode === 'edit' ? 'Modifier' : 'Creer'}{' '}
-              {editor?.type === 'brand'
-                ? 'une marque'
-                : editor?.type === 'category'
-                  ? 'une categorie'
-                  : editor?.type === 'subcategory'
-                    ? 'une sous-categorie'
-                    : editor?.type === 'subsubcategory'
-                      ? 'une sous-sous-categorie'
-                      : 'un equipement'}
+              {editor?.type === 'domain' ? 'un domaine' : editor?.type === 'brand' ? 'une marque' : editor?.type === 'series' ? 'une serie' : 'un model'}
             </DialogTitle>
-            <DialogDescription>
-              Respect des relations du catalogue et des filtres de navigation.
-            </DialogDescription>
+            <DialogDescription>Edition alignee sur les entites du schema Renewtech.</DialogDescription>
           </DialogHeader>
 
           {editor ? (
@@ -746,251 +719,209 @@ export default function AdminEquipmentPage() {
               <div className="grid gap-4 md:grid-cols-2">
                 <div>
                   <Label>Nom *</Label>
-                  <Input value={form.name} onChange={(e) => setForm((prev) => ({ ...prev, name: e.target.value }))} className="mt-2 h-10 border-slate-200 bg-slate-50" />
+                  <Input className="mt-2 h-10 border-slate-200 bg-slate-50" value={form.name} onChange={(e) => setForm((prev) => ({ ...prev, name: e.target.value }))} />
                 </div>
                 <div>
                   <Label>Slug</Label>
-                  <Input value={form.slug} onChange={(e) => setForm((prev) => ({ ...prev, slug: e.target.value }))} className="mt-2 h-10 border-slate-200 bg-slate-50" placeholder="auto genere si vide" />
+                  <Input className="mt-2 h-10 border-slate-200 bg-slate-50" value={form.slug} onChange={(e) => setForm((prev) => ({ ...prev, slug: e.target.value }))} placeholder="auto genere si vide" />
                 </div>
               </div>
 
-              {editor.type !== 'equipment' ? (
-                <div className="grid gap-4 md:grid-cols-2">
+              {editor.type === 'domain' ? (
+                <div className="grid gap-4 md:grid-cols-3">
+                  <div>
+                    <Label>Code</Label>
+                    <Input className="mt-2 h-10 border-slate-200 bg-slate-50" value={form.code} onChange={(e) => setForm((prev) => ({ ...prev, code: e.target.value }))} />
+                  </div>
+                  <div>
+                    <Label>Icon</Label>
+                    <Input className="mt-2 h-10 border-slate-200 bg-slate-50" value={form.icon} onChange={(e) => setForm((prev) => ({ ...prev, icon: e.target.value }))} />
+                  </div>
+                  <div>
+                    <Label>Ordre</Label>
+                    <Input className="mt-2 h-10 border-slate-200 bg-slate-50" value={form.sortOrder} onChange={(e) => setForm((prev) => ({ ...prev, sortOrder: e.target.value }))} />
+                  </div>
+                </div>
+              ) : null}
+
+              {editor.type === 'brand' ? (
+                <>
+                  <div>
+                    <Label>Domaine *</Label>
+                    <select className="mt-2 h-10 w-full rounded-lg border border-slate-200 bg-slate-50 px-3 text-sm" value={form.domainId} onChange={(e) => setForm((prev) => ({ ...prev, domainId: e.target.value }))}>
+                      <option value="">Choisir</option>
+                      {domains.map((item) => (
+                        <option key={item.id} value={item.id}>{item.label}</option>
+                      ))}
+                    </select>
+                  </div>
+                  <div className="grid gap-4 md:grid-cols-2">
+                    <div>
+                      <Label>Logo URL</Label>
+                      <Input className="mt-2 h-10 border-slate-200 bg-slate-50" value={form.logo} onChange={(e) => setForm((prev) => ({ ...prev, logo: e.target.value }))} />
+                    </div>
+                    <div>
+                      <Label>Description</Label>
+                      <Input className="mt-2 h-10 border-slate-200 bg-slate-50" value={form.description} onChange={(e) => setForm((prev) => ({ ...prev, description: e.target.value }))} />
+                    </div>
+                  </div>
+                </>
+              ) : null}
+
+              {editor.type === 'series' ? (
+                <>
+                  <div className="grid gap-4 md:grid-cols-2">
+                    <div>
+                      <Label>Domaine *</Label>
+                      <select className="mt-2 h-10 w-full rounded-lg border border-slate-200 bg-slate-50 px-3 text-sm" value={form.domainId} onChange={(e) => setForm((prev) => ({ ...prev, domainId: e.target.value, brandId: '' }))}>
+                        <option value="">Choisir</option>
+                        {domains.map((item) => (
+                          <option key={item.id} value={item.id}>{item.label}</option>
+                        ))}
+                      </select>
+                    </div>
+                    <div>
+                      <Label>Marque *</Label>
+                      <select className="mt-2 h-10 w-full rounded-lg border border-slate-200 bg-slate-50 px-3 text-sm" value={form.brandId} onChange={(e) => setForm((prev) => ({ ...prev, brandId: e.target.value }))}>
+                        <option value="">Choisir</option>
+                        {editorBrands.map((item) => (
+                          <option key={item.id} value={item.id}>{item.name}</option>
+                        ))}
+                      </select>
+                    </div>
+                  </div>
                   <div>
                     <Label>Description</Label>
-                    <textarea
-                      value={form.description}
-                      onChange={(e) => setForm((prev) => ({ ...prev, description: e.target.value }))}
-                      className="mt-2 min-h-24 w-full rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-sm outline-none"
-                    />
+                    <Input className="mt-2 h-10 border-slate-200 bg-slate-50" value={form.description} onChange={(e) => setForm((prev) => ({ ...prev, description: e.target.value }))} />
                   </div>
-                  <div className="space-y-4">
-                    <div>
-                      <Label>{editor.type === 'brand' ? 'Logo URL' : 'Media URL'}</Label>
-                      <Input value={editor.type === 'brand' ? form.logo : form.photo} onChange={(e) => setForm((prev) => (editor.type === 'brand' ? { ...prev, logo: e.target.value } : { ...prev, photo: e.target.value }))} className="mt-2 h-10 border-slate-200 bg-slate-50" />
-                    </div>
-                    <div>
-                      <Label>Ordre</Label>
-                      <Input value={form.sortOrder} onChange={(e) => setForm((prev) => ({ ...prev, sortOrder: e.target.value }))} className="mt-2 h-10 border-slate-200 bg-slate-50" />
-                    </div>
-                  </div>
-                </div>
+                </>
               ) : null}
 
-              {editor.type === 'subcategory' ? (
-                <div>
-                  <Label>Categorie parente *</Label>
-                  <select value={form.categoryId} onChange={(e) => setForm((prev) => ({ ...prev, categoryId: e.target.value }))} className="mt-2 h-10 w-full rounded-lg border border-slate-200 bg-slate-50 px-3 text-sm">
-                    <option value="">Choisir</option>
-                    {categoryOptions.map((item) => (
-                      <option key={item.id} value={item.id}>{item.name}</option>
-                    ))}
-                  </select>
-                </div>
-              ) : null}
-
-              {editor.type === 'subsubcategory' ? (
-                <div>
-                  <Label>Sous-categorie parente *</Label>
-                  <select value={form.subCategoryId} onChange={(e) => setForm((prev) => ({ ...prev, subCategoryId: e.target.value }))} className="mt-2 h-10 w-full rounded-lg border border-slate-200 bg-slate-50 px-3 text-sm">
-                    <option value="">Choisir</option>
-                    {subcategories.map((item) => (
-                      <option key={item.id} value={item.id}>{item.name}</option>
-                    ))}
-                  </select>
-                </div>
-              ) : null}
-
-              {editor.type === 'equipment' ? (
+              {editor.type === 'model' ? (
                 <div className="space-y-4">
+                  <div className="grid gap-4 md:grid-cols-3">
+                    <div>
+                      <Label>Domaine *</Label>
+                      <select className="mt-2 h-10 w-full rounded-lg border border-slate-200 bg-slate-50 px-3 text-sm" value={form.domainId} onChange={(e) => setForm((prev) => ({ ...prev, domainId: e.target.value, brandId: '', seriesId: '' }))}>
+                        <option value="">Choisir</option>
+                        {domains.map((item) => (
+                          <option key={item.id} value={item.id}>{item.label}</option>
+                        ))}
+                      </select>
+                    </div>
+                    <div>
+                      <Label>Marque *</Label>
+                      <select className="mt-2 h-10 w-full rounded-lg border border-slate-200 bg-slate-50 px-3 text-sm" value={form.brandId} onChange={(e) => setForm((prev) => ({ ...prev, brandId: e.target.value, seriesId: '' }))}>
+                        <option value="">Choisir</option>
+                        {editorBrands.map((item) => (
+                          <option key={item.id} value={item.id}>{item.name}</option>
+                        ))}
+                      </select>
+                    </div>
+                    <div>
+                      <Label>Serie *</Label>
+                      <select className="mt-2 h-10 w-full rounded-lg border border-slate-200 bg-slate-50 px-3 text-sm" value={form.seriesId} onChange={(e) => setForm((prev) => ({ ...prev, seriesId: e.target.value }))}>
+                        <option value="">Choisir</option>
+                        {editorSeries.map((item) => (
+                          <option key={item.id} value={item.id}>{item.name}</option>
+                        ))}
+                      </select>
+                    </div>
+                  </div>
+
                   <div className="grid gap-4 md:grid-cols-2">
                     <div>
                       <Label>Reference *</Label>
-                      <Input value={form.reference} onChange={(e) => setForm((prev) => ({ ...prev, reference: e.target.value }))} className="mt-2 h-10 border-slate-200 bg-slate-50" />
+                      <Input className="mt-2 h-10 border-slate-200 bg-slate-50" value={form.reference} onChange={(e) => setForm((prev) => ({ ...prev, reference: e.target.value }))} />
                     </div>
                     <div>
-                      <Label>Prix</Label>
-                      <Input value={form.price} onChange={(e) => setForm((prev) => ({ ...prev, price: e.target.value }))} className="mt-2 h-10 border-slate-200 bg-slate-50" />
+                      <Label>Condition</Label>
+                      <Input className="mt-2 h-10 border-slate-200 bg-slate-50" value={form.condition} onChange={(e) => setForm((prev) => ({ ...prev, condition: e.target.value }))} placeholder="NEW / REFURBISHED" />
                     </div>
                   </div>
 
-                  <div className="grid gap-4 md:grid-cols-2">
+                  <div className="grid gap-4 md:grid-cols-3">
                     <div>
-                      <Label>Quantite</Label>
-                      <Input value={form.quantity} onChange={(e) => setForm((prev) => ({ ...prev, quantity: e.target.value }))} className="mt-2 h-10 border-slate-200 bg-slate-50" />
+                      <Label>Prix de base</Label>
+                      <Input className="mt-2 h-10 border-slate-200 bg-slate-50" value={form.basePrice} onChange={(e) => setForm((prev) => ({ ...prev, basePrice: e.target.value }))} />
+                    </div>
+                    <div>
+                      <Label>Stock</Label>
+                      <Input className="mt-2 h-10 border-slate-200 bg-slate-50" value={form.stockQty} onChange={(e) => setForm((prev) => ({ ...prev, stockQty: e.target.value }))} />
                     </div>
                     <div>
                       <Label>Status</Label>
-                      <select value={form.status} onChange={(e) => setForm((prev) => ({ ...prev, status: e.target.value as EquipmentItem['status'] }))} className="mt-2 h-10 w-full rounded-lg border border-slate-200 bg-slate-50 px-3 text-sm">
+                      <select className="mt-2 h-10 w-full rounded-lg border border-slate-200 bg-slate-50 px-3 text-sm" value={form.status} onChange={(e) => setForm((prev) => ({ ...prev, status: e.target.value as EquipmentModelItem['status'] }))}>
                         <option value="AVAILABLE">AVAILABLE</option>
                         <option value="OUT_OF_STOCK">OUT_OF_STOCK</option>
-                      </select>
-                    </div>
-                  </div>
-
-                  <div className="grid gap-4 md:grid-cols-2">
-                    <div>
-                      <Label>Type d&apos;equipement</Label>
-                      <select value={form.equipmentType} onChange={(e) => setForm((prev) => ({ ...prev, equipmentType: e.target.value as EquipmentItem['equipmentType'] }))} className="mt-2 h-10 w-full rounded-lg border border-slate-200 bg-slate-50 px-3 text-sm">
-                        <option value="SERVER">SERVER</option>
-                        <option value="STORAGE">STORAGE</option>
-                        <option value="NETWORK">NETWORK</option>
-                        <option value="COMPONENT">COMPONENT</option>
-                      </select>
-                    </div>
-                    <div className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-xs text-slate-600">
-                      {form.equipmentType === 'SERVER'
-                        ? "Pour SERVER, ajoutez les specs: cpu, ram, storage."
-                        : 'Pour les autres types, les specs sont libres selon votre modele.'}
-                    </div>
-                  </div>
-
-                  <div className="grid gap-4 md:grid-cols-2">
-                    <div>
-                      <Label>Marque *</Label>
-                      <select value={form.brandId} onChange={(e) => setForm((prev) => ({ ...prev, brandId: e.target.value }))} className="mt-2 h-10 w-full rounded-lg border border-slate-200 bg-slate-50 px-3 text-sm">
-                        <option value="">Choisir</option>
-                        {brands.map((item) => (
-                          <option key={item.id} value={item.id}>{item.name}</option>
-                        ))}
-                      </select>
-                    </div>
-                    <div>
-                      <Label>Categorie *</Label>
-                      <select value={form.categoryId} onChange={(e) => setForm((prev) => ({ ...prev, categoryId: e.target.value, subCategoryId: '', subSubCategoryId: '' }))} className="mt-2 h-10 w-full rounded-lg border border-slate-200 bg-slate-50 px-3 text-sm">
-                        <option value="">Choisir</option>
-                        {categories.map((item) => (
-                          <option key={item.id} value={item.id}>{item.name}</option>
-                        ))}
-                      </select>
-                    </div>
-                  </div>
-
-                  <div className="grid gap-4 md:grid-cols-2">
-                    <div>
-                      <Label>Sous-categorie *</Label>
-                      <select value={form.subCategoryId} onChange={(e) => setForm((prev) => ({ ...prev, subCategoryId: e.target.value, subSubCategoryId: '' }))} className="mt-2 h-10 w-full rounded-lg border border-slate-200 bg-slate-50 px-3 text-sm">
-                        <option value="">Choisir</option>
-                        {subcategories.filter((item) => !form.categoryId || item.categoryId === form.categoryId).map((item) => (
-                          <option key={item.id} value={item.id}>{item.name}</option>
-                        ))}
-                      </select>
-                    </div>
-                    <div>
-                      <Label>Sous-sous-categorie</Label>
-                      <select value={form.subSubCategoryId} onChange={(e) => setForm((prev) => ({ ...prev, subSubCategoryId: e.target.value }))} className="mt-2 h-10 w-full rounded-lg border border-slate-200 bg-slate-50 px-3 text-sm">
-                        <option value="">Aucune</option>
-                        {subsubcategories.filter((item) => !form.subCategoryId || item.subCategoryId === form.subCategoryId).map((item) => (
-                          <option key={item.id} value={item.id}>{item.name}</option>
-                        ))}
+                        <option value="DISCONTINUED">DISCONTINUED</option>
                       </select>
                     </div>
                   </div>
 
                   <div>
-                    <Label>Photo</Label>
-                    <div className="mt-2 flex flex-col gap-3 sm:flex-row sm:items-center">
-                      <Input value={form.photo} onChange={(e) => setForm((prev) => ({ ...prev, photo: e.target.value }))} className="h-10 border-slate-200 bg-slate-50" placeholder="/uploads/equipment/... ou upload" />
-                      <input ref={photoInputRef} type="file" accept="image/*" className="hidden" onChange={async (e) => {
-                        const file = e.target.files?.[0]
-                        if (!file) return
-                        try {
-                          await handlePhotoUpload(file)
-                          toast.success('Photo envoyee')
-                        } catch (error) {
-                          toast.error(error instanceof Error ? error.message : 'Upload impossible')
-                        } finally {
-                          e.target.value = ''
-                        }
-                      }} />
-                      <Button type="button" variant="outline" className="border-slate-200 bg-white" onClick={() => photoInputRef.current?.click()}>
-                        <Upload className="h-4 w-4" />
-                        Importer
-                      </Button>
-                    </div>
+                    <Label>Description courte</Label>
+                    <Input className="mt-2 h-10 border-slate-200 bg-slate-50" value={form.shortDescription} onChange={(e) => setForm((prev) => ({ ...prev, shortDescription: e.target.value }))} />
+                  </div>
+                  <div>
+                    <Label>Description longue</Label>
+                    <textarea className="mt-2 min-h-24 w-full rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-sm" value={form.longDescription} onChange={(e) => setForm((prev) => ({ ...prev, longDescription: e.target.value }))} />
                   </div>
 
                   <div>
-                    <Label>Description</Label>
-                    <textarea
-                      value={form.description}
-                      onChange={(e) => setForm((prev) => ({ ...prev, description: e.target.value }))}
-                      className="mt-2 min-h-28 w-full rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-sm outline-none"
-                    />
-                  </div>
-
-                  <div className="space-y-2">
-                    <div className="flex items-center justify-between">
-                      <Label>Caracteristiques (equipmentSpec)</Label>
-                      <Button
-                        type="button"
-                        variant="outline"
-                        size="sm"
-                        onClick={() =>
-                          setForm((prev) => ({
-                            ...prev,
-                            specs: [...prev.specs, { specKey: '', specValue: '', unit: '' }],
-                          }))
-                        }
-                      >
-                        <Plus className="h-3.5 w-3.5" />
-                        Ajouter spec
-                      </Button>
-                    </div>
-                    <div className="space-y-2">
-                      {form.specs.map((spec, index) => (
-                        <div key={`${index}-${spec.specKey}`} className="grid gap-2 rounded-lg border border-slate-200 bg-slate-50 p-3 md:grid-cols-[1fr_1fr_120px_auto]">
-                          <Input
-                            value={spec.specKey}
-                            onChange={(e) =>
-                              setForm((prev) => ({
-                                ...prev,
-                                specs: prev.specs.map((item, i) => (i === index ? { ...item, specKey: e.target.value } : item)),
-                              }))
-                            }
-                            placeholder="specKey (cpu, ram, storage...)"
-                            className="h-10 border-slate-200 bg-white"
-                          />
-                          <Input
-                            value={spec.specValue}
-                            onChange={(e) =>
-                              setForm((prev) => ({
-                                ...prev,
-                                specs: prev.specs.map((item, i) => (i === index ? { ...item, specValue: e.target.value } : item)),
-                              }))
-                            }
-                            placeholder="specValue"
-                            className="h-10 border-slate-200 bg-white"
-                          />
-                          <Input
-                            value={spec.unit}
-                            onChange={(e) =>
-                              setForm((prev) => ({
-                                ...prev,
-                                specs: prev.specs.map((item, i) => (i === index ? { ...item, unit: e.target.value } : item)),
-                              }))
-                            }
-                            placeholder="unit"
-                            className="h-10 border-slate-200 bg-white"
+                    <Label>Photo du produit</Label>
+                    <div className="mt-2 space-y-3">
+                      {form.image ? (
+                        <div className="relative h-32 w-32">
+                          <img
+                            src={form.image}
+                            alt="Product"
+                            className="h-32 w-32 rounded-lg object-cover ring-1 ring-slate-200"
                           />
                           <Button
+                            size="sm"
                             type="button"
                             variant="outline"
-                            className="h-10 border-slate-200"
-                            onClick={() =>
-                              setForm((prev) => ({
-                                ...prev,
-                                specs:
-                                  prev.specs.length === 1
-                                    ? [{ specKey: '', specValue: '', unit: '' }]
-                                    : prev.specs.filter((_, i) => i !== index),
-                              }))
-                            }
+                            className="absolute top-1 right-1 h-7 w-7 bg-white p-0"
+                            onClick={() => setForm((prev) => ({ ...prev, image: '' }))}
                           >
-                            <Trash2 className="h-4 w-4" />
+                            <X className="h-3.5 w-3.5" />
                           </Button>
                         </div>
-                      ))}
+                      ) : (
+                        <div className="flex h-32 w-32 items-center justify-center rounded-lg border border-dashed border-slate-300 bg-slate-50">
+                          <ImageIcon className="h-6 w-6 text-slate-400" />
+                        </div>
+                      )}
+                      <Button
+                        type="button"
+                        size="sm"
+                        variant="outline"
+                        onClick={() => photoInputRef.current?.click()}
+                        className="w-full"
+                      >
+                        <Upload className="h-4 w-4 mr-2" />
+                        Choisir une photo
+                      </Button>
+                      <input
+                        ref={photoInputRef}
+                        type="file"
+                        accept="image/jpeg,image/png,image/webp"
+                        className="hidden"
+                        onChange={(e) => {
+                          const file = e.currentTarget.files?.[0]
+                          if (file) {
+                            toast.promise(
+                              handlePhotoUpload(file),
+                              {
+                                loading: 'Upload en cours...',
+                                success: 'Photo uploadee',
+                                error: 'Erreur lors de l\'upload',
+                              }
+                            )
+                          }
+                        }}
+                      />
                     </div>
                   </div>
                 </div>
@@ -1000,7 +931,7 @@ export default function AdminEquipmentPage() {
 
           <DialogFooter>
             <Button variant="outline" onClick={closeEditor}>Annuler</Button>
-            <Button onClick={handleSave} disabled={saving} className="bg-sky-600 text-white hover:bg-sky-700">
+            <Button className="bg-sky-600 text-white hover:bg-sky-700" onClick={() => void handleSave()} disabled={saving}>
               {saving ? <Loader2 className="h-4 w-4 animate-spin" /> : null}
               Sauvegarder
             </Button>
@@ -1008,6 +939,17 @@ export default function AdminEquipmentPage() {
         </DialogContent>
       </Dialog>
     </div>
+  )
+}
+
+function StatCard({ title, value, tone }: { title: string; value: number; tone: string }) {
+  return (
+    <Card className="border-slate-200 bg-white shadow-sm">
+      <CardContent className="py-4">
+        <p className="text-xs uppercase tracking-wide text-slate-500">{title}</p>
+        <p className={`mt-1 text-3xl font-bold ${tone}`}>{value}</p>
+      </CardContent>
+    </Card>
   )
 }
 
@@ -1021,7 +963,6 @@ function SimpleEntityTable({
 }: {
   title: string
   description: string
-  entity: EntityType
   rows: Array<{
     id: string
     title: string

@@ -1,9 +1,9 @@
 'use client'
-import { useEffect, useState, useRef } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { toast } from 'sonner'
 import {
   Mail, Phone, MapPin, Building2,
-  Loader2, Save, Camera, KeyRound, UserCircle
+  Loader2, Save, Camera, KeyRound, UserCircle, CheckCircle2, CircleX
 } from 'lucide-react'
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar'
 import { Badge } from '@/components/ui/badge'
@@ -34,6 +34,30 @@ export default function ClientProfilePage() {
   const [pwdForm, setPwdForm] = useState({
     currentPassword: '', newPassword: '', confirmPassword: ''
   })
+
+  const passwordRules = useMemo(() => {
+    const next = pwdForm.newPassword
+    return [
+      { id: 'min', label: 'Minimum 8 caracteres', ok: next.length >= 8 },
+      { id: 'upper', label: 'Au moins une majuscule', ok: /[A-Z]/.test(next) },
+      { id: 'lower', label: 'Au moins une minuscule', ok: /[a-z]/.test(next) },
+      { id: 'digit', label: 'Au moins un chiffre', ok: /\d/.test(next) },
+      { id: 'special', label: 'Au moins un caractere special', ok: /[^A-Za-z0-9]/.test(next) },
+      {
+        id: 'different',
+        label: 'Different du mot de passe actuel',
+        ok: next.length > 0 && pwdForm.currentPassword.length > 0 && next !== pwdForm.currentPassword,
+      },
+      {
+        id: 'match',
+        label: 'Confirmation identique',
+        ok: next.length > 0 && pwdForm.confirmPassword.length > 0 && next === pwdForm.confirmPassword,
+      },
+    ]
+  }, [pwdForm.confirmPassword, pwdForm.currentPassword, pwdForm.newPassword])
+
+  const passwordScore = passwordRules.filter((rule) => rule.ok).length
+  const passwordReady = passwordRules.every((rule) => rule.ok)
 
   useEffect(() => {
     fetch('/api/auth/me').then(r => r.json()).then(d => {
@@ -257,7 +281,38 @@ export default function ClientProfilePage() {
           </CardHeader>
           <CardContent className="space-y-4">
           <div className="rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2 text-xs text-emerald-700">
-            Le mot de passe doit contenir au minimum 8 caractères.
+            Utilisez un mot de passe robuste et unique pour proteger votre compte.
+          </div>
+
+          <div className="rounded-lg border border-slate-200 bg-slate-50 p-3">
+            <div className="mb-2 flex items-center justify-between text-xs">
+              <span className="font-semibold uppercase tracking-wide text-slate-600">Niveau de securite</span>
+              <span className="font-semibold text-slate-700">{passwordScore}/{passwordRules.length}</span>
+            </div>
+            <div className="h-2 rounded-full bg-slate-200">
+              <div
+                className={`h-full rounded-full transition-all ${
+                  passwordScore <= 2
+                    ? 'bg-rose-500'
+                    : passwordScore <= 5
+                      ? 'bg-amber-500'
+                      : 'bg-emerald-500'
+                }`}
+                style={{ width: `${(passwordScore / passwordRules.length) * 100}%` }}
+              />
+            </div>
+            <div className="mt-3 grid gap-2 sm:grid-cols-2">
+              {passwordRules.map((rule) => (
+                <div key={rule.id} className="flex items-center gap-2 text-xs">
+                  {rule.ok ? (
+                    <CheckCircle2 size={14} className="text-emerald-600" />
+                  ) : (
+                    <CircleX size={14} className="text-rose-500" />
+                  )}
+                  <span className={rule.ok ? 'text-emerald-700' : 'text-slate-600'}>{rule.label}</span>
+                </div>
+              ))}
+            </div>
           </div>
 
           <div className="space-y-4">
@@ -282,7 +337,7 @@ export default function ClientProfilePage() {
           </div>
 
           <div className="flex justify-end">
-            <Button onClick={handleChangePassword} disabled={saving} className="h-11 bg-sky-600 text-white hover:bg-sky-700">
+            <Button onClick={handleChangePassword} disabled={saving || !passwordReady} className="h-11 bg-sky-600 text-white hover:bg-sky-700 disabled:opacity-60">
               {saving ? <Loader2 size={14} className="animate-spin" /> : <KeyRound size={14} />}
               Changer le mot de passe
             </Button>

@@ -1,20 +1,13 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { jwtVerify } from 'jose'
-
 import { prisma } from '@/lib/prisma'
-import {
-  parseDecimal,
-  parseEquipmentSpecs,
-  parseEquipmentType,
-  parseInteger,
-  slugify,
-  validateEquipmentSpecs,
-} from '@/lib/equipment'
-import { EquipmentStatusEnum, Prisma } from '@prisma/client'
-
-const accessSecret = new TextEncoder().encode(process.env.JWT_ACCESS_SECRET!)
+import { slugify } from '@/lib/equipment'
 
 type CatalogType = 'brand' | 'category' | 'subcategory' | 'subsubcategory' | 'equipment'
+
+type EquipmentType = 'SERVER' | 'STORAGE' | 'NETWORK' | 'COMPONENT'
+
+const accessSecret = new TextEncoder().encode(process.env.JWT_ACCESS_SECRET!)
 
 function normalizeType(value: string | null): CatalogType | null {
   switch (value) {
@@ -56,77 +49,17 @@ function catalogError(message: string, status = 400) {
   return NextResponse.json({ error: message }, { status })
 }
 
-async function resolveLineage(categoryId: string) {
-  const byId = new Map<string, { id: string; parentId: string | null }>()
-  const categories = await prisma.equipmentCategory.findMany({
-    select: { id: true, parentId: true },
-  })
-  categories.forEach((item) => byId.set(item.id, item))
-
-  const path: string[] = []
-  let cursor = byId.get(categoryId)
-  while (cursor) {
-    path.push(cursor.id)
-    cursor = cursor.parentId ? byId.get(cursor.parentId) : undefined
-  }
-
-  const rootToLeaf = path.reverse()
-  return {
-    categoryId: rootToLeaf[0] || '',
-    subCategoryId: rootToLeaf[1] || '',
-    subSubCategoryId: rootToLeaf[2] || '',
-  }
+function inferEquipmentType(domain: { code: string; label: string } | null): EquipmentType {
+  const source = `${domain?.code ?? ''} ${domain?.label ?? ''}`.toUpperCase()
+  if (source.includes('STORAGE')) return 'STORAGE'
+  if (source.includes('NETWORK')) return 'NETWORK'
+  if (source.includes('COMPONENT')) return 'COMPONENT'
+  return 'SERVER'
 }
 
-type EquipmentWithRelations = Prisma.EquipmentGetPayload<{
-  include: { brand: true; category: true; images: true; specs: true }
-}>
-
-async function serializeEquipment(item: EquipmentWithRelations) {
-  const lineage = await resolveLineage(item.categoryId)
-  return {
-    id: item.id,
-    name: item.name,
-    slug: '',
-    reference: item.reference,
-    description: item.description,
-    photo: item.images[0]?.url || null,
-    price: item.price ? item.price.toString() : null,
-    quantity: item.quantity,
-    status: item.status,
-    equipmentType: item.equipmentType,
-    specs: item.specs.map((spec) => ({
-      id: spec.id,
-      specKey: spec.specKey,
-      specValue: spec.specValue,
-      unit: spec.unit,
-    })),
-    brandId: item.brandId,
-    categoryId: lineage.categoryId,
-    subCategoryId: lineage.subCategoryId,
-    subSubCategoryId: lineage.subSubCategoryId,
-    brand: item.brand,
-    category: item.category,
-  }
-}
-
-async function getParentLevel(parentId: string | null) {
-  if (!parentId) return 1
-  const parent = await prisma.equipmentCategory.findUnique({
-    where: { id: parentId },
-    select: { level: true },
-  })
-  if (!parent) throw new Error('Parent category introuvable')
-  return parent.level + 1
-}
-
-function resolveEquipmentCategoryId(body: Record<string, unknown>) {
-  return (
-    (body.subSubCategoryId as string | undefined) ||
-    (body.subCategoryId as string | undefined) ||
-    (body.categoryId as string | undefined) ||
-    ''
-  )
+async function resolveDefaultDomainId() {
+  const domain = await prisma.equipmentDomain.findFirst({ orderBy: { sortOrder: 'asc' }, select: { id: true } })
+  return domain?.id || null
 }
 
 export async function GET(req: NextRequest) {
@@ -138,114 +71,33 @@ export async function GET(req: NextRequest) {
 
   try {
     if (type === 'brand') {
-      const brands = await prisma.equipmentBrand.findMany({ orderBy: { name: 'asc' } })
+      const brands = await prisma.equipmentBrand.findMany({
+        orderBy: { name: 'asc' },
+        include: { domain: true },
+      })
       return NextResponse.json({ brands })
     }
 
-    if (type === 'category') {
-      const categories = await prisma.equipmentCategory.findMany({
-        where: { parentId: null },
-        orderBy: [{ level: 'asc' }, { name: 'asc' }],
-        include: {
-          children: {
-            orderBy: [{ level: 'asc' }, { name: 'asc' }],
-            include: {
-              children: {
-                orderBy: [{ level: 'asc' }, { name: 'asc' }],
-              },
-            },
-          },
-        },
-      })
-
-      return NextResponse.json({
-        categories: categories.map((item) => ({
-          id: item.id,
-          name: item.name,
-          slug: item.slug,
-          description: item.description,
-          icon: item.icon,
-          parentId: item.parentId,
-          level: item.level,
-          subCategories: item.children.map((child) => ({
-            id: child.id,
-            name: child.name,
-            slug: child.slug,
-            parentId: child.parentId,
-            level: child.level,
-            subCategories: child.children.map((leaf) => ({
-              id: leaf.id,
-              name: leaf.name,
-              slug: leaf.slug,
-            })),
-          })),
-        })),
-      })
-    }
-
-    if (type === 'subcategory') {
-      const categoryId = req.nextUrl.searchParams.get('categoryId') || undefined
-      const subcategories = await prisma.equipmentCategory.findMany({
-        where: {
-          parentId: categoryId,
-        },
-        orderBy: [{ level: 'asc' }, { name: 'asc' }],
-      })
-      return NextResponse.json({
-        subcategories: subcategories.map((item) => ({
-          id: item.id,
-          name: item.name,
-          slug: item.slug,
-          description: item.description,
-          icon: item.icon,
-          categoryId: item.parentId,
-        })),
-      })
-    }
-
-    if (type === 'subsubcategory') {
-      const subCategoryId = req.nextUrl.searchParams.get('subCategoryId') || undefined
-      const subsubcategories = await prisma.equipmentCategory.findMany({
-        where: {
-          parentId: subCategoryId,
-        },
-        orderBy: [{ level: 'asc' }, { name: 'asc' }],
-      })
-      return NextResponse.json({
-        subsubcategories: subsubcategories.map((item) => ({
-          id: item.id,
-          name: item.name,
-          slug: item.slug,
-          description: item.description,
-          icon: item.icon,
-          subCategoryId: item.parentId,
-        })),
-      })
-    }
+    if (type === 'category') return NextResponse.json({ categories: [] })
+    if (type === 'subcategory') return NextResponse.json({ subcategories: [] })
+    if (type === 'subsubcategory') return NextResponse.json({ subsubcategories: [] })
 
     const search = req.nextUrl.searchParams.get('search')?.trim() || ''
+    const domainId = req.nextUrl.searchParams.get('domainId') || undefined
     const brandId = req.nextUrl.searchParams.get('brandId') || undefined
-    const categoryId = req.nextUrl.searchParams.get('categoryId') || undefined
-    const subCategoryId = req.nextUrl.searchParams.get('subCategoryId') || undefined
-    const subSubCategoryId = req.nextUrl.searchParams.get('subSubCategoryId') || undefined
-    const status = req.nextUrl.searchParams.get('status') || undefined
-    const equipmentType = req.nextUrl.searchParams.get('equipmentType') || undefined
-    const effectiveCategoryId = subSubCategoryId || subCategoryId || categoryId
+    const seriesId = req.nextUrl.searchParams.get('seriesId') || undefined
 
-    const equipment = await prisma.equipment.findMany({
+    const models = await prisma.equipmentModel.findMany({
       where: {
+        ...(domainId ? { domainId } : {}),
         ...(brandId ? { brandId } : {}),
-        ...(effectiveCategoryId ? { categoryId: effectiveCategoryId } : {}),
-        ...(status ? { status: status as EquipmentStatusEnum } : {}),
-        ...(equipmentType ? { equipmentType: parseEquipmentType(equipmentType) } : {}),
+        ...(seriesId ? { seriesId } : {}),
         ...(search
           ? {
               OR: [
                 { name: { contains: search, mode: 'insensitive' } },
                 { reference: { contains: search, mode: 'insensitive' } },
-                { description: { contains: search, mode: 'insensitive' } },
-                { brand: { name: { contains: search, mode: 'insensitive' } } },
-                { category: { name: { contains: search, mode: 'insensitive' } } },
+                { shortDescription: { contains: search, mode: 'insensitive' } },
               ],
             }
           : {}),
@@ -253,19 +105,37 @@ export async function GET(req: NextRequest) {
       orderBy: [{ createdAt: 'desc' }],
       include: {
         brand: true,
-        category: true,
-        images: {
-          orderBy: { id: 'asc' },
-        },
-        specs: {
-          orderBy: { specKey: 'asc' },
-        },
+        domain: { select: { code: true, label: true } },
+        series: { select: { id: true, name: true } },
+        skus: { orderBy: { createdAt: 'asc' } },
       },
+      take: 200,
     })
 
-    return NextResponse.json({
-      equipment: await Promise.all(equipment.map((item) => serializeEquipment(item))),
+    const equipment = models.map((item) => {
+      const quantity = item.skus.reduce((sum, sku) => sum + sku.stockQty, 0)
+      return {
+        id: item.id,
+        name: item.name,
+        slug: item.slug,
+        reference: item.reference,
+        description: item.shortDescription || item.longDescription || null,
+        photo: null,
+        price: item.basePrice ? item.basePrice.toString() : null,
+        quantity,
+        status: quantity > 0 ? 'AVAILABLE' : 'OUT_OF_STOCK',
+        equipmentType: inferEquipmentType(item.domain),
+        specs: [],
+        domainId: item.domainId,
+        brandId: item.brandId,
+        seriesId: item.seriesId,
+        domain: item.domain,
+        brand: item.brand,
+        series: item.series,
+      }
     })
+
+    return NextResponse.json({ equipment })
   } catch (error) {
     console.error(error)
     return catalogError('Erreur serveur', 500)
@@ -284,115 +154,104 @@ export async function POST(req: NextRequest) {
 
     if (type === 'brand') {
       if (!body.name) return catalogError('Nom requis')
+      const domainId = body.domainId ? String(body.domainId) : await resolveDefaultDomainId()
+      if (!domainId) return catalogError('Aucun domaine disponible pour creer la marque', 400)
+
+      const name = String(body.name).trim()
       const brand = await prisma.equipmentBrand.create({
         data: {
-          name: String(body.name),
+          name,
+          slug: String(body.slug ?? slugify(name)),
           logo: (body.logo as string) || null,
+          description: (body.description as string) || null,
+          domainId,
         },
       })
       return NextResponse.json({ brand }, { status: 201 })
     }
 
-    if (type === 'category') {
-      if (!body.name) return catalogError('Nom requis')
-      const parentId = (body.parentId as string | undefined) || null
-      const level = await getParentLevel(parentId)
-      const category = await prisma.equipmentCategory.create({
-        data: {
-          name: String(body.name),
-          description: (body.description as string) || null,
-          parentId,
-          level,
-          slug: (body.slug as string) || slugify(String(body.name)),
-          icon: (body.icon as string) || null,
-        },
-      })
-      return NextResponse.json({ category }, { status: 201 })
+    if (type === 'category' || type === 'subcategory' || type === 'subsubcategory') {
+      return catalogError('Les categories legacy ne sont plus supportees avec ce schema', 400)
     }
 
-    if (type === 'subcategory') {
-      if (!body.name || !body.categoryId) return catalogError('Nom et categorie requis')
-      const level = await getParentLevel(String(body.categoryId))
-      const subcategory = await prisma.equipmentCategory.create({
-        data: {
-          name: String(body.name),
-          description: (body.description as string) || null,
-          parentId: String(body.categoryId),
-          level,
-          slug: (body.slug as string) || slugify(String(body.name)),
-          icon: (body.icon as string) || null,
-        },
-      })
-      return NextResponse.json({ subcategory }, { status: 201 })
-    }
-
-    if (type === 'subsubcategory') {
-      if (!body.name || !body.subCategoryId) return catalogError('Nom et sous-categorie requis')
-      const level = await getParentLevel(String(body.subCategoryId))
-      const subsubcategory = await prisma.equipmentCategory.create({
-        data: {
-          name: String(body.name),
-          description: (body.description as string) || null,
-          parentId: String(body.subCategoryId),
-          level,
-          slug: (body.slug as string) || slugify(String(body.name)),
-          icon: (body.icon as string) || null,
-        },
-      })
-      return NextResponse.json({ subsubcategory }, { status: 201 })
-    }
-
-    const resolvedCategoryId = resolveEquipmentCategoryId(body)
-    if (!body.name || !body.reference || !body.brandId || !resolvedCategoryId) {
+    if (!body.name || !body.reference || !body.brandId) {
       return catalogError('Champs obligatoires manquants')
     }
 
-    const equipmentType = parseEquipmentType(body.equipmentType)
-    const specs = parseEquipmentSpecs(body.specs)
-    const specsValidation = validateEquipmentSpecs(equipmentType, specs)
-    if (!specsValidation.ok) {
-      return catalogError(specsValidation.message)
-    }
+    const brand = await prisma.equipmentBrand.findUnique({
+      where: { id: String(body.brandId) },
+      select: { id: true, domainId: true },
+    })
+    if (!brand) return catalogError('Marque introuvable', 404)
 
-    const equipment = await prisma.equipment.create({
+    const seriesId = body.seriesId
+      ? String(body.seriesId)
+      : (
+          await prisma.equipmentSeries.findFirst({
+            where: { brandId: brand.id },
+            orderBy: { sortOrder: 'asc' },
+            select: { id: true },
+          })
+        )?.id
+
+    if (!seriesId) return catalogError('Aucune serie disponible pour cette marque', 400)
+
+    const model = await prisma.equipmentModel.create({
       data: {
         name: String(body.name),
+        slug: String(body.slug ?? slugify(String(body.name))),
         reference: String(body.reference),
-        description: (body.description as string) || null,
-        price: parseDecimal(body.price) ?? undefined,
-        quantity: parseInteger(body.quantity, 0),
-        status: (body.status as EquipmentStatusEnum) || 'AVAILABLE',
-        equipmentType,
-        brandId: String(body.brandId),
-        categoryId: resolvedCategoryId,
-        ...(specs.length > 0
-          ? {
-              specs: {
-                create: specs,
-              },
-            }
-          : {}),
-        ...(body.photo
-          ? {
-              images: {
-                create: [{ url: String(body.photo) }],
-              },
-            }
-          : {}),
+        shortDescription: (body.description as string) || null,
+        basePrice: typeof body.price === 'number' ? body.price : null,
+        brandId: brand.id,
+        domainId: brand.domainId,
+        seriesId,
       },
       include: {
         brand: true,
-        category: true,
-        images: true,
-        specs: true,
+        domain: { select: { code: true, label: true } },
+        series: { select: { id: true, name: true } },
+        skus: true,
       },
     })
 
-    return NextResponse.json({ equipment: await serializeEquipment(equipment) }, { status: 201 })
-  } catch (error) {
-    if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2002') {
-      return catalogError('Valeur deja utilisee', 409)
+    const initialStock = typeof body.quantity === 'number' ? body.quantity : 0
+    if (initialStock > 0 || typeof body.price === 'number') {
+      await prisma.equipmentSku.create({
+        data: {
+          modelId: model.id,
+          reference: `${model.reference}-SKU`,
+          name: `${model.name} SKU`,
+          price: typeof body.price === 'number' ? body.price : null,
+          stockQty: initialStock,
+          condition: 'NEW',
+        },
+      })
     }
+
+    const quantity = initialStock
+    const equipment = {
+      id: model.id,
+      name: model.name,
+      slug: model.slug,
+      reference: model.reference,
+      description: model.shortDescription,
+      photo: null,
+      price: model.basePrice ? model.basePrice.toString() : null,
+      quantity,
+      status: quantity > 0 ? 'AVAILABLE' : 'OUT_OF_STOCK',
+      equipmentType: inferEquipmentType(model.domain),
+      specs: [],
+      domainId: model.domainId,
+      brandId: model.brandId,
+      seriesId: model.seriesId,
+      domain: model.domain,
+      brand: model.brand,
+      series: model.series,
+    }
+
+    return NextResponse.json({ equipment }, { status: 201 })
+  } catch (error) {
     console.error(error)
     return catalogError('Erreur serveur', 500)
   }

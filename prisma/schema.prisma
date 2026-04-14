@@ -1,4 +1,4 @@
-// prisma/schema.prisma
+// prisma/schema.prisma (NEW - Renewtech Architecture)
 
 generator client {
   provider = "prisma-client-js"
@@ -7,6 +7,10 @@ generator client {
 datasource db {
   provider = "postgresql"
 }
+
+// =========================
+// ENUMS
+// =========================
 
 enum UserRole {
   ADMIN
@@ -22,18 +26,14 @@ enum StatusLogEnum {
 enum EquipmentStatusEnum {
   AVAILABLE
   OUT_OF_STOCK
-}
-
-enum EquipmentTypeEnum {
-  SERVER
-  STORAGE
-  NETWORK
-  COMPONENT
+  DISCONTINUED
 }
 
 enum CartStatusEnum {
   ACTIVE
-  VALIDATED
+  MERGED
+  CHECKED_OUT
+  ABANDONED
 }
 
 enum OrderStatusEnum {
@@ -73,6 +73,8 @@ enum NotificationTypeEnum {
   ORDER_STATUS_UPDATE
   TICKET_UPDATE
   PAYMENT
+  RECOMMENDATION_READY
+  SIMULATION_COMPLETED
   SYSTEM
 }
 
@@ -86,7 +88,81 @@ enum ApplicationTypeEnum {
   ERP
   WEB
   DATABASE
+  VIRTUALIZATION
+  AI_WORKLOAD
 }
+
+enum AttributeDataTypeEnum {
+  TEXT
+  NUMBER
+  BOOLEAN
+  ENUM
+}
+
+enum EquipmentFilterFieldTypeEnum {
+  TEXT
+  NUMBER
+  SELECT
+  BOOLEAN
+}
+
+enum ProductConditionEnum {
+  A
+  B
+  C
+}
+
+enum RecommendationRunStatusEnum {
+  PENDING
+  RUNNING
+  COMPLETED
+  FAILED
+}
+
+enum RecommendationSourceEnum {
+  AUTO_AGENT
+  USER_TRIGGERED
+  SCHEDULED
+}
+
+enum MetricTypeEnum {
+  SALES
+  REVENUE
+  CONVERSION_RATE
+  AVG_ORDER_VALUE
+  CART_ABANDON_RATE
+  CONFIG_COMPLETION_RATE
+  RECOMMENDATION_ACCEPT_RATE
+  STOCK_COVERAGE_DAYS
+  CO2_SAVED_KG
+  ACTIVE_USERS
+}
+
+enum MetricScopeEnum {
+  GLOBAL
+  DOMAIN
+  BRAND
+  SERIES
+  MODEL
+  USER
+}
+
+enum NotificationChannelEnum {
+  IN_APP
+  EMAIL
+  PUSH
+}
+
+enum NotificationDeliveryStatusEnum {
+  PENDING
+  SENT
+  FAILED
+  READ
+}
+
+// =========================
+// IDENTITY / ACCESS
+// =========================
 
 model User {
   id          String    @id @default(uuid())
@@ -103,32 +179,22 @@ model User {
   isVerified  Boolean   @default(false)
   isActive    Boolean   @default(true)
   createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
   lastLogin   DateTime?
 
-  carts         Cart[]
-  quotes        Quote[]
-  orders        Order[]
-  payments      Payment[]
-  tickets       Ticket[]
-  notifications Notification[]
-  simulations   Simulation[]
-  loginLogs     LoginLog[]
-  refreshTokens RefreshToken[]
+  carts              Cart[]
+  orders             Order[]
+  payments           Payment[]
+  tickets            Ticket[]
+  notifications      Notification[]
+  notificationPreferences NotificationPreference[]
+  simulations        Simulation[]
+  loginLogs          LoginLog[]
+  refreshTokens      RefreshToken[]
+  quotes             Quote[]
+  recommendationFeedbacks RecommendationFeedback[]
 
   @@map("users")
-}
-
-model LoginLog {
-  id          String        @id @default(uuid())
-  userId      String
-  ipAddress   String
-  deviceInfo  String
-  loginDate   DateTime      @default(now())
-  statusLog   StatusLogEnum
-
-  user        User          @relation(fields: [userId], references: [id], onDelete: Cascade)
-
-  @@map("login_logs")
 }
 
 model RefreshToken {
@@ -144,263 +210,671 @@ model RefreshToken {
   @@map("refresh_tokens")
 }
 
+model GuestSession {
+  id        String   @id @default(uuid())
+  token     String   @unique
+  expiresAt DateTime
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  carts          Cart[]
+  simulations    Simulation[]
+  recommendationFeedbacks RecommendationFeedback[]
+
+  @@map("guest_sessions")
+}
+
+model LoginLog {
+  id          String        @id @default(uuid())
+  userId      String
+  ipAddress   String
+  deviceInfo  String
+  loginDate   DateTime      @default(now())
+  statusLog   StatusLogEnum
+
+  user        User          @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@map("login_logs")
+}
+
+// =========================
+// CATALOGUE HIERARCHY
+// =========================
+
+model EquipmentDomain {
+  id        String   @id @default(uuid())
+  code      String   @unique
+  label     String
+  slug      String   @unique
+  icon      String?
+  isActive  Boolean  @default(true)
+  sortOrder Int      @default(0)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  brands EquipmentBrand[]
+  series EquipmentSeries[]
+  models EquipmentModel[]
+
+  @@map("equipment_domains")
+}
+
 model EquipmentBrand {
-  id          String      @id @default(uuid())
+  id          String   @id @default(uuid())
+  domainId    String
   name        String
+  slug        String   @unique
   logo        String?
-
-  equipment Equipment[]
-
-  @@map("brand")
-}
-
-model EquipmentCategory {
-  id          String               @id @default(uuid())
-  name        String
   description String?
-  parentId    String?
-  level       Int                  @default(1)
-  slug        String               @unique
-  icon        String?
+  isActive    Boolean  @default(true)
+  sortOrder   Int      @default(0)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
 
-  parent   EquipmentCategory?  @relation("CategoryHierarchy", fields: [parentId], references: [id], onDelete: SetNull)
-  children EquipmentCategory[] @relation("CategoryHierarchy")
-  equipment Equipment[]
+  domain      EquipmentDomain @relation(fields: [domainId], references: [id], onDelete: Cascade)
+  series      EquipmentSeries[]
+  models      EquipmentModel[]
 
-  @@index([parentId])
-  @@map("category")
+  @@index([domainId])
+  @@map("equipment_brands")
 }
 
-model Equipment {
-  id                  String                    @id @default(uuid())
-  name                String
-  reference           String                    @unique
-  description         String?
-  price               Decimal?                  @db.Decimal(12, 2)
-  quantity            Int                       @default(0) @map("stockQuantity")
-  status              EquipmentStatusEnum       @default(AVAILABLE)
-  equipmentType       EquipmentTypeEnum         @default(SERVER)
-  brandId             String
-  categoryId          String
-  createdAt           DateTime                  @default(now())
+model EquipmentSeries {
+  id          String   @id @default(uuid())
+  brandId     String
+  domainId    String
+  name        String
+  slug        String   @unique
+  description String?
+  isActive    Boolean  @default(true)
+  sortOrder   Int      @default(0)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
 
-  brand             EquipmentBrand            @relation(fields: [brandId], references: [id], onDelete: Restrict)
-  category          EquipmentCategory         @relation(fields: [categoryId], references: [id], onDelete: Restrict)
-  specs             EquipmentSpec[]
-  images            EquipmentImage[]
-  cartItems         CartItem[]
-  confirms          Confirm[]
-  orderItems        OrderItem[]
-  simulations       Simulation[]
-  technicalScore    TechnicalScore?
+  brand       EquipmentBrand @relation(fields: [brandId], references: [id], onDelete: Cascade)
+  domain      EquipmentDomain @relation(fields: [domainId], references: [id], onDelete: Cascade)
+  models      EquipmentModel[]
 
   @@index([brandId])
-  @@index([categoryId])
-  @@map("equipment")
+  @@index([domainId])
+  @@map("equipment_series")
 }
 
-model EquipmentSpec {
-  id          String    @id @default(uuid())
-  equipmentId String
-  specKey     String
-  specValue   String
-  unit        String
+model EquipmentModel {
+  id                  String   @id @default(uuid())
+  brandId             String
+  seriesId            String
+  domainId            String
+  name                String
+  slug                String   @unique
+  reference           String   @unique
+  shortDescription    String?
+  longDescription     String?  @db.Text
+  basePrice           Decimal? @db.Decimal(12, 2)
+  status              EquipmentStatusEnum @default(AVAILABLE)
+  isConfigurable      Boolean  @default(false)
+  warrantyMonths      Int?
+  ratingValue         Float?
+  ratingCount         Int?     @default(0)
+  co2SavedKg          Float?
+  stockQty            Int      @default(0)
+  condition           String?
+  createdAt           DateTime @default(now())
+  updatedAt           DateTime @updatedAt
 
-  equipment Equipment @relation(fields: [equipmentId], references: [id], onDelete: Cascade)
+  brand               EquipmentBrand      @relation(fields: [brandId], references: [id], onDelete: Restrict)
+  series              EquipmentSeries     @relation(fields: [seriesId], references: [id], onDelete: Restrict)
+  domain              EquipmentDomain     @relation(fields: [domainId], references: [id], onDelete: Restrict)
+  
+  skus                EquipmentSku[]
+  images              EquipmentImage[]
+  attributeValues     AttributeValue[]
+  filterGroups        EquipmentFilterGroup[]
+  filters             EquipmentFilter[]
+  products            Product[]
+  productAttributes   ProductAttribute[]
+  technicalScore      TechnicalScore?
+  recommendationItems RecommendationItem[]
 
-  @@index([equipmentId])
-  @@map("equipmentSpec")
+  @@index([brandId])
+  @@index([seriesId])
+  @@index([domainId])
+  @@map("equipment_models")
+}
+
+model EquipmentSku {
+  id          String   @id @default(uuid())
+  modelId     String
+  reference   String   @unique
+  name        String
+  price       Decimal? @db.Decimal(12, 2)
+  stockQty    Int      @default(0)
+  condition   String?
+  status      EquipmentStatusEnum @default(AVAILABLE)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  model           EquipmentModel  @relation(fields: [modelId], references: [id], onDelete: Cascade)
+  images          EquipmentImage[]
+  attributeValues AttributeValue[]
+  cartItems       CartItem[]
+  orderItems      OrderItem[]
+
+  @@index([modelId])
+  @@map("equipment_skus")
 }
 
 model EquipmentImage {
-  id          String    @id @default(uuid())
-  url         String
-  equipmentId String
+  id        String   @id @default(uuid())
+  modelId   String?
+  skuId     String?
+  url       String
+  alt       String?
+  sortOrder Int      @default(0)
+  createdAt DateTime @default(now())
 
-  equipment Equipment @relation(fields: [equipmentId], references: [id], onDelete: Cascade)
+  model EquipmentModel? @relation(fields: [modelId], references: [id], onDelete: Cascade)
+  sku   EquipmentSku?   @relation(fields: [skuId], references: [id], onDelete: Cascade)
 
-  @@index([equipmentId])
-  @@map("equipmentImage")
+  @@index([modelId])
+  @@index([skuId])
+  @@map("equipment_images")
 }
 
-model TechnicalScore {
-  id                          String   @id @default(uuid())
-  cpuScore                    Float
-  ramScore                    Float
-  storageScore                Float
-  gpuScore                    Float
-  reliabilityIndex            Float
-  equipmentId                 String   @unique
-  estimatedRemainingLife      Int
-  economicComparisonIndex     Float
+model AttributeDefinition {
+  id            String   @id @default(uuid())
+  code          String   @unique
+  label         String
+  dataType      AttributeDataTypeEnum
+  unit          String?
+  isFilterable  Boolean  @default(false)
+  isFacetable   Boolean  @default(false)
+  isComparable  Boolean  @default(false)
+  sortOrder     Int      @default(0)
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
 
-  equipment Equipment @relation(fields: [equipmentId], references: [id], onDelete: Cascade)
+  values AttributeValue[]
 
-  @@map("technicalScore")
+  @@map("attribute_definitions")
 }
 
-model DashboardMetric {
-  id         String   @id @default(uuid())
-  metricType String
-  value      Float
-  date       DateTime @default(now())
+model AttributeValue {
+  id                  String   @id @default(uuid())
+  modelId             String?
+  skuId               String?
+  attributeDefinitionId String
+  valueText           String?
+  valueNumber         Float?
+  valueBoolean        Boolean?
+  valueEnum           String?
+  createdAt           DateTime @default(now())
+  updatedAt           DateTime @updatedAt
 
-  @@map("dashboardMetric")
+  model               EquipmentModel?      @relation(fields: [modelId], references: [id], onDelete: Cascade)
+  sku                 EquipmentSku?        @relation(fields: [skuId], references: [id], onDelete: Cascade)
+  attributeDefinition AttributeDefinition  @relation(fields: [attributeDefinitionId], references: [id], onDelete: Cascade)
+
+  @@index([modelId])
+  @@index([skuId])
+  @@index([attributeDefinitionId])
+  @@map("attribute_values")
 }
+
+model EquipmentFilterGroup {
+  id               String   @id @default(uuid())
+  equipmentModelId String
+  name             String
+  slug             String
+  displayOrder     Int      @default(0)
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+
+  equipmentModel EquipmentModel   @relation(fields: [equipmentModelId], references: [id], onDelete: Cascade)
+  filters        EquipmentFilter[]
+
+  @@index([equipmentModelId])
+  @@unique([equipmentModelId, slug])
+  @@map("equipment_filter_groups")
+}
+
+model EquipmentFilter {
+  id           String                     @id @default(uuid())
+  filterGroupId String
+  equipmentModelId String
+  label        String
+  fieldKey     String
+  fieldType    EquipmentFilterFieldTypeEnum
+  unit         String?
+  displayOrder Int                        @default(0)
+  createdAt    DateTime                   @default(now())
+  updatedAt    DateTime                   @updatedAt
+
+  filterGroup       EquipmentFilterGroup   @relation(fields: [filterGroupId], references: [id], onDelete: Cascade)
+  equipmentModel    EquipmentModel         @relation(fields: [equipmentModelId], references: [id], onDelete: Cascade)
+  options           EquipmentFilterOption[]
+  productAttributes ProductAttribute[]      @relation("FilterToProductAttributes")
+
+  @@index([filterGroupId])
+  @@index([equipmentModelId])
+  @@unique([filterGroupId, fieldKey])
+  @@unique([id, equipmentModelId])
+  @@map("equipment_filters")
+}
+
+model EquipmentFilterOption {
+  id           String   @id @default(uuid())
+  filterId     String
+  value        String
+  label        String
+  displayOrder Int      @default(0)
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  filter EquipmentFilter @relation(fields: [filterId], references: [id], onDelete: Cascade)
+
+  @@index([filterId])
+  @@unique([filterId, value])
+  @@map("equipment_filter_options")
+}
+
+model Product {
+  id               String               @id @default(uuid())
+  equipmentModelId String
+  sku              String               @unique
+  name             String
+  price            Decimal              @db.Decimal(12, 2)
+  condition        ProductConditionEnum
+  stock            Int                  @default(0)
+  isActive         Boolean              @default(true)
+  createdAt        DateTime             @default(now())
+  updatedAt        DateTime             @updatedAt
+
+  equipmentModel EquipmentModel    @relation(fields: [equipmentModelId], references: [id], onDelete: Restrict)
+  attributes     ProductAttribute[] @relation("ProductToAttributes")
+
+  @@index([equipmentModelId])
+  @@unique([id, equipmentModelId])
+  @@map("products")
+}
+
+model ProductAttribute {
+  id        String   @id @default(uuid())
+  productId String
+  filterId  String
+  equipmentModelId String
+  value     String
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  product        Product         @relation("ProductToAttributes", fields: [productId, equipmentModelId], references: [id, equipmentModelId], onDelete: Cascade)
+  filter         EquipmentFilter @relation("FilterToProductAttributes", fields: [filterId, equipmentModelId], references: [id, equipmentModelId], onDelete: Restrict)
+  equipmentModel EquipmentModel  @relation(fields: [equipmentModelId], references: [id], onDelete: Cascade)
+
+  @@index([productId])
+  @@index([filterId])
+  @@index([equipmentModelId])
+  @@unique([productId, filterId])
+  @@map("product_attributes")
+}
+
+// =========================
+// COMMERCE
+// =========================
 
 model Cart {
-  id        String         @id @default(uuid())
-  userId    String
-  status    CartStatusEnum @default(ACTIVE)
-  createdAt DateTime       @default(now())
+  id            String   @id @default(uuid())
+  guestSessionId String?
+  userId        String?
+  status        CartStatusEnum @default(ACTIVE)
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
 
-  user  User       @relation(fields: [userId], references: [id], onDelete: Cascade)
-  items CartItem[]
+  guestSession GuestSession? @relation(fields: [guestSessionId], references: [id], onDelete: SetNull)
+  user         User?         @relation(fields: [userId], references: [id], onDelete: Cascade)
+  items        CartItem[]
 
+  @@index([guestSessionId])
   @@index([userId])
-  @@map("cart")
+  @@map("carts")
 }
 
 model CartItem {
-  id          String   @id @default(uuid())
-  cartId      String
-  equipmentId String?
-  quantity    Int      @default(1)
-  unitPrice   Decimal  @db.Decimal(12, 2)
+  id            String   @id @default(uuid())
+  cartId        String
+  skuId         String?
+  quantity      Int      @default(1)
+  unitPrice     Decimal  @db.Decimal(12, 2)
+  lineTotal     Decimal  @db.Decimal(12, 2)
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
 
-  cart      Cart       @relation(fields: [cartId], references: [id], onDelete: Cascade)
-  equipment Equipment? @relation(fields: [equipmentId], references: [id], onDelete: SetNull)
+  cart         Cart           @relation(fields: [cartId], references: [id], onDelete: Cascade)
+  sku          EquipmentSku?  @relation(fields: [skuId], references: [id], onDelete: SetNull)
 
   @@index([cartId])
-  @@index([equipmentId])
-  @@map("cartItem")
-}
-
-model Quote {
-  id         String          @id @default(uuid())
-  userId     String
-  amount     Decimal         @db.Decimal(12, 2)
-  createdAt  DateTime        @default(now())
-
-  user     User      @relation(fields: [userId], references: [id], onDelete: Cascade)
-  confirms Confirm[]
-  orders   Order[]
-
-  @@index([userId])
-  @@map("quote")
-}
-
-model Confirm {
-  id          String   @id @default(uuid())
-  quoteId     String
-  quantity    Int      @default(1)
-  unitPrice   Decimal  @db.Decimal(12, 2)
-  equipmentId String
-
-  quote     Quote     @relation(fields: [quoteId], references: [id], onDelete: Cascade)
-  equipment Equipment @relation(fields: [equipmentId], references: [id], onDelete: Restrict)
-
-  @@index([quoteId])
-  @@index([equipmentId])
-  @@map("confirm")
+  @@index([skuId])
+  @@map("cart_items")
 }
 
 model Order {
-  id         String          @id @default(uuid())
-  userId     String
-  quoteId    String?
-  status     OrderStatusEnum @default(PENDING)
-  createdAt  DateTime        @default(now())
+  id        String   @id @default(uuid())
+  userId    String
+  status    OrderStatusEnum @default(PENDING)
+  subtotal  Decimal  @db.Decimal(12, 2)
+  tax       Decimal  @db.Decimal(12, 2)
+  shipping  Decimal  @db.Decimal(12, 2)
+  total     Decimal  @db.Decimal(12, 2)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 
   user     User       @relation(fields: [userId], references: [id], onDelete: Cascade)
-  quote    Quote?     @relation(fields: [quoteId], references: [id], onDelete: SetNull)
   items    OrderItem[]
   payments Payment[]
 
   @@index([userId])
-  @@index([quoteId])
-  @@map("order")
+  @@map("orders")
 }
 
 model OrderItem {
-  id          String   @id @default(uuid())
-  orderId     String
-  quantity    Int      @default(1)
-  price       Decimal  @db.Decimal(12, 2)
-  equipmentId String
+  id              String   @id @default(uuid())
+  orderId         String
+  skuId           String?
+  description     String?
+  quantity        Int      @default(1)
+  unitPrice       Decimal  @db.Decimal(12, 2)
+  lineTotal       Decimal  @db.Decimal(12, 2)
+  createdAt       DateTime @default(now())
 
-  order     Order     @relation(fields: [orderId], references: [id], onDelete: Cascade)
-  equipment Equipment @relation(fields: [equipmentId], references: [id], onDelete: Restrict)
+  order         Order            @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  sku           EquipmentSku?    @relation(fields: [skuId], references: [id], onDelete: SetNull)
 
   @@index([orderId])
-  @@index([equipmentId])
-  @@map("orderItem")
+  @@index([skuId])
+  @@map("order_items")
 }
 
 model Payment {
-  id         String            @id @default(uuid())
-  userId     String
-  orderId    String
-  amount     Decimal           @db.Decimal(12, 2)
-  method     PaymentMethodEnum
-  status     PaymentStatusEnum @default(PENDING)
-  createdAt  DateTime          @default(now())
+  id             String   @id @default(uuid())
+  userId         String
+  orderId        String
+  amount         Decimal  @db.Decimal(12, 2)
+  method         PaymentMethodEnum
+  status         PaymentStatusEnum @default(PENDING)
+  transactionRef String?
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
 
   user  User  @relation(fields: [userId], references: [id], onDelete: Cascade)
   order Order @relation(fields: [orderId], references: [id], onDelete: Cascade)
 
   @@index([userId])
   @@index([orderId])
-  @@map("payment")
+  @@map("payments")
 }
 
-model Ticket {
-  id          String             @id @default(uuid())
-  userId      String
-  title       String
-  description String
-  status      TicketStatusEnum   @default(OPEN)
-  priority    TicketPriorityEnum @default(LOW)
-  createdAt   DateTime           @default(now())
+model Quote {
+  id        String   @id @default(uuid())
+  userId    String
+  amount    Decimal  @db.Decimal(12, 2)
+  status    String   @default("PENDING")
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 
   user User @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   @@index([userId])
-  @@map("ticket")
+  @@map("quotes")
+}
+
+// =========================
+// SUPPORT
+// =========================
+
+model Ticket {
+  id          String   @id @default(uuid())
+  userId      String
+  title       String
+  description String  @db.Text
+  status      TicketStatusEnum @default(OPEN)
+  priority    TicketPriorityEnum @default(LOW)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@map("tickets")
 }
 
 model Notification {
-  id           String              @id @default(uuid())
-  userId       String
-  title        String
-  message      String
-  type         NotificationTypeEnum
-  isRead       Boolean             @default(false)
-  referenceId  String?
+  id            String   @id @default(uuid())
+  userId        String
+  title         String
+  message       String   @db.Text
+  type          NotificationTypeEnum
+  isRead        Boolean  @default(false)
+  readAt        DateTime?
   referenceType String?
-  createdAt    DateTime            @default(now())
+  referenceId   String?
+  priority      String?  @default("NORMAL")
+  createdAt     DateTime @default(now())
+
+  user              User                  @relation(fields: [userId], references: [id], onDelete: Cascade)
+  deliveries        NotificationDelivery[]
+
+  @@index([userId])
+  @@map("notifications")
+}
+
+model NotificationPreference {
+  id        String   @id @default(uuid())
+  userId    String
+  channel   NotificationChannelEnum
+  type      NotificationTypeEnum
+  isEnabled Boolean  @default(true)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 
   user User @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   @@index([userId])
-  @@map("notification")
+  @@unique([userId, channel, type])
+  @@map("notification_preferences")
 }
 
+model NotificationDelivery {
+  id              String   @id @default(uuid())
+  notificationId  String
+  channel         NotificationChannelEnum
+  status          NotificationDeliveryStatusEnum @default(PENDING)
+  providerMessageId String?
+  errorMessage    String?
+  sentAt          DateTime?
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  notification Notification @relation(fields: [notificationId], references: [id], onDelete: Cascade)
+
+  @@index([notificationId])
+  @@map("notification_deliveries")
+}
+
+// =========================
+// SIMULATION / AI / METRICS
+// =========================
+
 model Simulation {
-  id             String        @id @default(uuid())
-  numberOfUsers  Int
-  cpuUsage       Float
-  ramUsage       Float
-  riskLevel      RiskLevelEnum
-  reliabilityIndex Float @map("reliabilityIdx")
-  equipmentId    String
-  userId         String
-  createdAt      DateTime      @default(now())
+  id                    String   @id @default(uuid())
+  guestSessionId        String?
+  userId                String?
+  name                  String?
+  applicationType       ApplicationTypeEnum
+  riskLevel             RiskLevelEnum
+  numberOfUsers         Int
+  cpuUsagePct           Float
+  ramUsagePct           Float
+  storageUsagePct       Float
+  networkUsagePct       Float
+  budgetMin             Decimal? @db.Decimal(12, 2)
+  budgetMax             Decimal? @db.Decimal(12, 2)
+  targetCo2ReductionKg  Float?
+  availabilityTargetPct Float?
+  growthRatePct         Float?
+  horizonMonths         Int?
+  createdAt             DateTime @default(now())
+  updatedAt             DateTime @updatedAt
 
-  equipment Equipment @relation(fields: [equipmentId], references: [id], onDelete: Cascade)
-  user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  guestSession GuestSession?      @relation(fields: [guestSessionId], references: [id], onDelete: SetNull)
+  user         User?              @relation(fields: [userId], references: [id], onDelete: SetNull)
+  recommendations RecommendationRun[]
 
-  @@index([equipmentId])
+  @@index([guestSessionId])
   @@index([userId])
-  @@map("simulate")
+  @@map("simulations")
+}
+
+model RecommendationRun {
+  id               String   @id @default(uuid())
+  simulationId     String
+  status           RecommendationRunStatusEnum @default(PENDING)
+  source           RecommendationSourceEnum
+  modelVersion     String
+  globalScore      Float?
+  reasoningSummary String?  @db.Text
+  startedAt        DateTime?
+  finishedAt       DateTime?
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+
+  simulation Simulation          @relation(fields: [simulationId], references: [id], onDelete: Cascade)
+  items      RecommendationItem[]
+
+  @@index([simulationId])
+  @@map("recommendation_runs")
+}
+
+model RecommendationItem {
+  id                  String   @id @default(uuid())
+  runId               String
+  modelId             String
+  rank                Int
+  fitScore            Float
+  performanceScore    Float
+  costScore           Float
+  reliabilityScore    Float
+  sustainabilityScore Float
+  estimatedPrice      Decimal? @db.Decimal(12, 2)
+  estimatedCo2SavedKg Float?
+  explanation         String?  @db.Text
+  isAccepted          Boolean  @default(false)
+  createdAt           DateTime @default(now())
+
+  run       RecommendationRun      @relation(fields: [runId], references: [id], onDelete: Cascade)
+  model     EquipmentModel         @relation(fields: [modelId], references: [id], onDelete: Cascade)
+  feedback  RecommendationFeedback[]
+
+  @@index([runId])
+  @@index([modelId])
+  @@map("recommendation_items")
+}
+
+model RecommendationFeedback {
+  id                   String   @id @default(uuid())
+  recommendationItemId String
+  guestSessionId       String?
+  userId               String?
+  feedbackType         String
+  rating               Int?
+  comment              String?
+  createdAt            DateTime @default(now())
+
+  item         RecommendationItem @relation(fields: [recommendationItemId], references: [id], onDelete: Cascade)
+  guestSession GuestSession?      @relation(fields: [guestSessionId], references: [id], onDelete: SetNull)
+  user         User?              @relation(fields: [userId], references: [id], onDelete: SetNull)
+
+  @@index([recommendationItemId])
+  @@index([guestSessionId])
+  @@index([userId])
+  @@map("recommendation_feedbacks")
+}
+
+model AutonomousAgentJob {
+  id           String   @id @default(uuid())
+  jobType      String
+  triggeredBy  RecommendationSourceEnum
+  payloadJson  String   @db.Text
+  status       String
+  retryCount   Int      @default(0)
+  nextRunAt    DateTime?
+  lastError    String?
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  @@map("autonomous_agent_jobs")
+}
+
+model DashboardMetric {
+  id           String   @id @default(uuid())
+  metricType   MetricTypeEnum
+  scope        MetricScopeEnum
+  scopeId      String?
+  periodStart  DateTime
+  periodEnd    DateTime
+  value        Float
+  unit         String?
+  aggregation  String
+  metadataJson String?  @db.Text
+  computedAt   DateTime
+  createdAt    DateTime @default(now())
+
+  history DashboardMetricHistory[]
+
+  @@index([metricType])
+  @@index([scope])
+  @@map("dashboard_metrics")
+}
+
+model DashboardMetricHistory {
+  id              String   @id @default(uuid())
+  dashboardMetricId String
+  value           Float
+  capturedAt      DateTime @default(now())
+
+  metric DashboardMetric @relation(fields: [dashboardMetricId], references: [id], onDelete: Cascade)
+
+  @@index([dashboardMetricId])
+  @@map("dashboard_metric_history")
+}
+
+// =========================
+// TECHNICAL / LEGACY
+// =========================
+
+model TechnicalScore {
+  id                      String   @id @default(uuid())
+  modelId                 String   @unique
+  cpuScore                Float
+  ramScore                Float
+  storageScore            Float
+  gpuScore                Float
+  reliabilityIndex        Float
+  estimatedRemainingLife  Int
+  economicComparisonIndex Float
+  createdAt               DateTime @default(now())
+  updatedAt               DateTime @updatedAt
+
+  model EquipmentModel @relation(fields: [modelId], references: [id], onDelete: Cascade)
+
+  @@map("technical_scores")
+}
+
+model DashboardMetricLegacy {
+  id         String   @id @default(uuid())
+  metricType String
+  value      Float
+  date       DateTime @default(now())
+
+  @@map("dashboard_metrics_legacy")
 }

@@ -7,6 +7,14 @@ import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Input } from '@/components/ui/input'
+import {
+  Pagination,
+  PaginationContent,
+  PaginationItem,
+  PaginationLink,
+  PaginationNext,
+  PaginationPrevious,
+} from '@/components/ui/pagination'
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
 
 interface Log {
@@ -28,6 +36,7 @@ export default function AdminLogsPage() {
   const [loading, setLoading] = useState(true)
   const [search, setSearch] = useState('')
   const [filter, setFilter] = useState<'ALL' | 'SUCCESS' | 'FAILED'>('ALL')
+  const [page, setPage] = useState(1)
 
   async function fetchLogs() {
     setLoading(true)
@@ -66,6 +75,13 @@ export default function AdminLogsPage() {
       return matchesSearch && matchesFilter
     })
   }, [logs, search, filter])
+
+  const perPage = 12
+  const totalPages = Math.max(1, Math.ceil(filtered.length / perPage))
+  const pagedLogs = useMemo(() => {
+    const start = (page - 1) * perPage
+    return filtered.slice(start, start + perPage)
+  }, [filtered, page])
 
   const successCount = logs.filter((l) => l.statusLog === 'SUCCESS').length
   const failedCount = logs.filter((l) => l.statusLog === 'FAILED').length
@@ -114,7 +130,10 @@ export default function AdminLogsPage() {
               <Search size={14} className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
               <Input
                 value={search}
-                onChange={(e) => setSearch(e.target.value)}
+                onChange={(e) => {
+                  setSearch(e.target.value)
+                  setPage(1)
+                }}
                 placeholder="Rechercher utilisateur, email ou IP"
                 className="h-10 border-slate-200 bg-slate-50 pl-9"
               />
@@ -126,7 +145,10 @@ export default function AdminLogsPage() {
                   key={f}
                   type="button"
                   variant={filter === f ? 'default' : 'outline'}
-                  onClick={() => setFilter(f)}
+                  onClick={() => {
+                    setFilter(f)
+                    setPage(1)
+                  }}
                   className={filter === f ? 'bg-sky-600 text-white hover:bg-sky-700' : 'border-slate-200 bg-white'}
                 >
                   {f === 'ALL' ? 'Tous' : f === 'SUCCESS' ? 'Succes' : 'Echecs'}
@@ -159,7 +181,7 @@ export default function AdminLogsPage() {
                   </TableCell>
                 </TableRow>
               ) : (
-                filtered.map((log) => (
+                pagedLogs.map((log) => (
                   <TableRow key={log.id}>
                     <TableCell className="font-medium text-slate-900">
                       {log.user.firstName} {log.user.lastName}
@@ -200,6 +222,51 @@ export default function AdminLogsPage() {
               )}
             </TableBody>
           </Table>
+
+          <div className="mt-5">
+            <Pagination>
+              <PaginationContent>
+                <PaginationItem>
+                  <PaginationPrevious
+                    href="#"
+                    text="Precedent"
+                    onClick={(event) => {
+                      event.preventDefault()
+                      setPage((prev) => Math.max(1, prev - 1))
+                    }}
+                  />
+                </PaginationItem>
+
+                {Array.from({ length: totalPages }, (_, index) => index + 1)
+                  .slice(Math.max(0, page - 3), Math.min(totalPages, page + 2))
+                  .map((p) => (
+                    <PaginationItem key={p}>
+                      <PaginationLink
+                        href="#"
+                        isActive={p === page}
+                        onClick={(event) => {
+                          event.preventDefault()
+                          setPage(p)
+                        }}
+                      >
+                        {p}
+                      </PaginationLink>
+                    </PaginationItem>
+                  ))}
+
+                <PaginationItem>
+                  <PaginationNext
+                    href="#"
+                    text="Suivant"
+                    onClick={(event) => {
+                      event.preventDefault()
+                      setPage((prev) => Math.min(totalPages, prev + 1))
+                    }}
+                  />
+                </PaginationItem>
+              </PaginationContent>
+            </Pagination>
+          </div>
         </CardContent>
       </Card>
     </div>

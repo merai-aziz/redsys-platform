@@ -1,186 +1,181 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { EquipmentStatusEnum, EquipmentTypeEnum } from '@prisma/client'
-
 import { prisma } from '@/lib/prisma'
-
-function emptyCatalogPayload() {
-  return {
-    brands: [],
-    categories: [],
-    subcategories: [],
-    subsubcategories: [],
-    equipment: [],
-  }
-}
-
-function mapCategoryNode(node: {
-  id: string
-  name: string
-  slug: string
-  description: string | null
-  icon: string | null
-  parentId: string | null
-  level: number
-  children: Array<{
-    id: string
-    name: string
-    slug: string
-    description: string | null
-    icon: string | null
-    parentId: string | null
-    level: number
-    children?: Array<{ id: string; name: string; slug: string }>
-  }>
-}) {
-  return {
-    id: node.id,
-    name: node.name,
-    slug: node.slug,
-    description: node.description,
-    icon: node.icon,
-    parentId: node.parentId,
-    level: node.level,
-    subCategories: node.children.map((child) => ({
-      id: child.id,
-      name: child.name,
-      slug: child.slug,
-      parentId: child.parentId,
-      level: child.level,
-      subCategories: (child.children || []).map((leaf) => ({
-        id: leaf.id,
-        name: leaf.name,
-        slug: leaf.slug,
-      })),
-    })),
-  }
-}
 
 export async function GET(req: NextRequest) {
   try {
     const search = req.nextUrl.searchParams.get('search')?.trim() || ''
-    const brandId = req.nextUrl.searchParams.get('brandId') || undefined
-    const brand = req.nextUrl.searchParams.get('brand')?.trim() || undefined
-    const categoryId = req.nextUrl.searchParams.get('categoryId') || undefined
-    const category = req.nextUrl.searchParams.get('category')?.trim() || undefined
-    const subCategoryId = req.nextUrl.searchParams.get('subCategoryId') || undefined
-    const subSubCategoryId = req.nextUrl.searchParams.get('subSubCategoryId') || undefined
-    const status = req.nextUrl.searchParams.get('status') || undefined
-    const equipmentType = req.nextUrl.searchParams.get('equipmentType') || undefined
-    const effectiveCategoryId = subSubCategoryId || subCategoryId || categoryId
+    const domainId = req.nextUrl.searchParams.get('domainId')
+    const brandId = req.nextUrl.searchParams.get('brandId')
+    const seriesId = req.nextUrl.searchParams.get('seriesId')
+    const modelId = req.nextUrl.searchParams.get('modelId')
 
-    const [brands, categories, subcategories, subsubcategories, equipment] = await Promise.all([
-      prisma.equipmentBrand.findMany({ orderBy: { name: 'asc' } }),
-      prisma.equipmentCategory.findMany({
-        where: { parentId: null },
-        orderBy: [{ level: 'asc' }, { name: 'asc' }],
-        include: {
-          children: {
-            orderBy: [{ level: 'asc' }, { name: 'asc' }],
-            include: {
-              children: {
-                orderBy: [{ level: 'asc' }, { name: 'asc' }],
-              },
-            },
-          },
-        },
+    // Fetch all catalog data in parallel
+    const [domains, brands, series, models, skus] = await Promise.all([
+      prisma.equipmentDomain.findMany({
+        orderBy: { sortOrder: 'asc' },
       }),
-      prisma.equipmentCategory.findMany({
-        where: { parent: { is: { parentId: null } } },
-        orderBy: [{ level: 'asc' }, { name: 'asc' }],
-        select: {
-          id: true,
-          name: true,
-          slug: true,
-          parentId: true,
+      prisma.equipmentBrand.findMany({
+        where: {
+          ...(brandId ? { id: brandId } : {}),
         },
+        orderBy: [{ sortOrder: 'asc' }, { name: 'asc' }],
       }),
-      prisma.equipmentCategory.findMany({
-        where: { parent: { is: { parentId: { not: null } } } },
-        orderBy: [{ level: 'asc' }, { name: 'asc' }],
-        select: {
-          id: true,
-          name: true,
-          slug: true,
-          parentId: true,
-        },
-      }),
-      prisma.equipment.findMany({
+      prisma.equipmentSeries.findMany({
         where: {
           ...(brandId ? { brandId } : {}),
-          ...(!brandId && brand ? { brand: { name: { equals: brand, mode: 'insensitive' } } } : {}),
-          ...(effectiveCategoryId ? { categoryId: effectiveCategoryId } : {}),
-          ...(!effectiveCategoryId && category
-            ? { category: { name: { equals: category, mode: 'insensitive' } } }
-            : {}),
-          ...(status ? { status: status as EquipmentStatusEnum } : {}),
-          ...(equipmentType ? { equipmentType: equipmentType as EquipmentTypeEnum } : {}),
+          ...(seriesId ? { id: seriesId } : {}),
+        },
+        orderBy: [{ sortOrder: 'asc' }, { name: 'asc' }],
+      }),
+      prisma.equipmentModel.findMany({
+        where: {
+          isConfigurable: true,
+          filterGroups: { some: {} },
+          ...(modelId ? { id: modelId } : {}),
+          ...(seriesId ? { seriesId } : {}),
+          ...(brandId ? { brandId } : {}),
+          ...(domainId ? { domainId } : {}),
           ...(search
             ? {
                 OR: [
                   { name: { contains: search, mode: 'insensitive' } },
+                  { shortDescription: { contains: search, mode: 'insensitive' } },
+                  { longDescription: { contains: search, mode: 'insensitive' } },
                   { reference: { contains: search, mode: 'insensitive' } },
-                  { description: { contains: search, mode: 'insensitive' } },
-                  { brand: { name: { contains: search, mode: 'insensitive' } } },
-                  { category: { name: { contains: search, mode: 'insensitive' } } },
                 ],
               }
             : {}),
         },
-        orderBy: [{ createdAt: 'desc' }],
+        orderBy: { name: 'asc' },
         include: {
-          brand: true,
-          category: true,
-          images: true,
-          specs: {
-            orderBy: { specKey: 'asc' },
+          images: {
+            where: { skuId: null },
+            orderBy: { sortOrder: 'asc' },
+            take: 1,
+          },
+          products: {
+            where: { isActive: true },
+            include: {
+              attributes: {
+                include: {
+                  filter: {
+                    select: {
+                      id: true,
+                      fieldKey: true,
+                      label: true,
+                      unit: true,
+                      fieldType: true,
+                    },
+                  },
+                },
+              },
+            },
+          },
+          skus: {
+            orderBy: { createdAt: 'asc' },
           },
         },
+        take: 100,
+      }),
+      prisma.equipmentSku.findMany({
+        orderBy: { createdAt: 'desc' },
+        take: 200,
       }),
     ])
 
     return NextResponse.json({
-      brands,
-      categories: categories.map(mapCategoryNode),
-      subcategories: subcategories.map((item) => ({
-        id: item.id,
-        name: item.name,
-        slug: item.slug,
-        categoryId: item.parentId,
+      domains: domains.map((d) => ({
+        id: d.id,
+        code: d.code,
+        name: d.label,
+        icon: d.icon,
+        displayOrder: d.sortOrder,
       })),
-      subsubcategories: subsubcategories.map((item) => ({
-        id: item.id,
-        name: item.name,
-        slug: item.slug,
-        subCategoryId: item.parentId,
+      brands: brands
+        .filter((b) => models.some((m) => m.brandId === b.id))
+        .map((b) => ({
+        id: b.id,
+        name: b.name,
+        logo: b.logo,
+        domainId: b.domainId,
+        sortOrder: b.sortOrder,
       })),
-      equipment: equipment.map((item) => ({
-        id: item.id,
-        name: item.name,
-        reference: item.reference,
-        description: item.description,
-        photo: item.images[0]?.url || null,
-        price: item.price ? item.price.toString() : null,
-        quantity: item.quantity,
-        status: item.status,
-        equipmentType: item.equipmentType,
-        specs: item.specs.map((spec) => ({
-          id: spec.id,
-          specKey: spec.specKey,
-          specValue: spec.specValue,
-          unit: spec.unit,
-        })),
-        brand: { id: item.brand.id, name: item.brand.name },
-        category: { id: item.category.id, name: item.category.name },
+      series: series
+        .filter((s) => models.some((m) => m.seriesId === s.id))
+        .map((s) => ({
+        id: s.id,
+        name: s.name,
+        image: null,
+        description: s.description,
+        brandId: s.brandId,
+        domainId: s.domainId,
+        sortOrder: s.sortOrder,
+      })),
+      models: models.map((m) => {
+        const attributesByKey = new Map<string, {
+          code: string
+          label: string
+          value: string
+          unit: string | null
+          isFilterable: boolean
+          isFacetable: boolean
+          dataType: string
+        }>()
+
+        for (const product of m.products) {
+          for (const attribute of product.attributes) {
+            if (!attribute.value) continue
+            const key = `${attribute.filter.fieldKey}:${attribute.value}`
+            if (attributesByKey.has(key)) continue
+
+            attributesByKey.set(key, {
+              code: attribute.filter.fieldKey,
+              label: attribute.filter.label,
+              value: attribute.value,
+              unit: attribute.filter.unit,
+              isFilterable: true,
+              isFacetable: true,
+              dataType: attribute.filter.fieldType,
+            })
+          }
+        }
+
+        const activeStock = m.products.reduce((sum, product) => sum + Math.max(product.stock, 0), 0)
+        const minActivePrice = m.products.reduce<number | null>((minPrice, product) => {
+          const nextPrice = Number(product.price)
+          if (Number.isNaN(nextPrice)) return minPrice
+          if (minPrice === null) return nextPrice
+          return Math.min(minPrice, nextPrice)
+        }, null)
+
+        return {
+          id: m.id,
+          name: m.name,
+          reference: m.reference,
+          shortDescription: m.shortDescription,
+          longDescription: m.longDescription,
+          basePrice: minActivePrice ?? Number(m.basePrice ?? 0),
+          image: m.images[0]?.url ?? null,
+          stockQty: Math.max(activeStock, m.skus.reduce((sum, sku) => sum + (sku.stockQty ?? 0), 0), m.stockQty ?? 0),
+          status: m.status,
+          condition: m.condition,
+          seriesId: m.seriesId,
+          brandId: m.brandId,
+          domainId: m.domainId,
+          attributes: Array.from(attributesByKey.values()),
+        }
+      }),
+      skus: skus.map((s) => ({
+        id: s.id,
+        sku: s.reference,
+        modelId: s.modelId,
+        price: Number(s.price ?? 0),
+        stock: s.stockQty,
+        condition: s.condition ?? '',
       })),
     })
   } catch (error) {
-    console.error(error)
-    return NextResponse.json(
-      {
-        ...emptyCatalogPayload(),
-        error: 'Erreur serveur',
-      },
-      { status: 500 }
-    )
+    console.error('Error fetching catalog:', error)
+    return NextResponse.json({ error: 'Erreur serveur' }, { status: 500 })
   }
 }

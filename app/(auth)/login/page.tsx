@@ -1,6 +1,5 @@
 'use client'
 import { useState } from 'react'
-import { useRouter } from 'next/navigation'
 import { useForm } from 'react-hook-form'
 import { zodResolver } from '@hookform/resolvers/zod'
 import * as z from 'zod'
@@ -18,7 +17,6 @@ const schema = z.object({
 type FormData = z.infer<typeof schema>
 
 export default function LoginPage() {
-  const router = useRouter()
   const [showPwd, setShowPwd] = useState(false)
   const [loading, setLoading] = useState(false)
 
@@ -44,9 +42,9 @@ export default function LoginPage() {
 
       toast.success('Connexion réussie !')
       const role = json.user.role
-      if (role === 'ADMIN') router.push('/admin/users')
-      else if (role === 'EMPLOYEE') router.push('/employee/profile')
-      else router.push('/client/profile')
+      if (role === 'ADMIN') window.location.assign('/admin/users')
+      else if (role === 'EMPLOYEE') window.location.assign('/employee/profile')
+      else window.location.assign('/client/profile')
     } catch {
       toast.error('Erreur réseau')
     } finally {

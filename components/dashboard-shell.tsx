@@ -2,7 +2,7 @@
 
 import Link from 'next/link'
 import { useEffect, useMemo, useState } from 'react'
-import { usePathname, useRouter } from 'next/navigation'
+import { usePathname } from 'next/navigation'
 import { Bell, ChevronRight, Layers, LogOut, Menu } from 'lucide-react'
 import type { LucideIcon } from 'lucide-react'
 
@@ -50,10 +50,15 @@ export function DashboardShell({
   children,
 }: DashboardShellProps) {
   const pathname = usePathname()
-  const router = useRouter()
   const [user, setUser] = useState<AuthUser | null>(null)
   const [notifOpen, setNotifOpen] = useState(false)
   const [sheetOpen, setSheetOpen] = useState(false)
+
+  function redirectToLogin() {
+    if (typeof window !== 'undefined') {
+      window.location.replace('/login')
+    }
+  }
 
   useEffect(() => {
     let mounted = true
@@ -69,9 +74,9 @@ export function DashboardShell({
           return
         }
 
-        router.replace('/login')
+        redirectToLogin()
       } catch {
-        if (mounted) router.replace('/login')
+        if (mounted) redirectToLogin()
       }
     }
 
@@ -80,7 +85,7 @@ export function DashboardShell({
     return () => {
       mounted = false
     }
-  }, [allowedRole, router])
+  }, [allowedRole])
 
   const initials = useMemo(() => {
     if (!user) return '??'
@@ -89,7 +94,7 @@ export function DashboardShell({
 
   async function handleLogout() {
     await fetch('/api/auth/logout', { method: 'POST' })
-    router.replace('/login')
+    redirectToLogin()
   }
 
   function renderSidebarNav(mobile = false) {
