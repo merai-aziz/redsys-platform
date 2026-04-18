@@ -7,14 +7,10 @@ const pool = new pg.Pool({ connectionString: process.env.DATABASE_URL })
 const adapter = new PrismaPg(pool)
 const prisma = new PrismaClient({ adapter })
 
-/**
- * Seed database with catalog data
- * Using the new unified catalog system: Brand > Category > Family > Product
- */
 async function main() {
-  console.log('?? Seeding catalog data...')
+  console.log('🌱 Seeding catalog data...')
 
-  // Brands
+  // Create Brands
   const brands = await Promise.all([
     prisma.brand.upsert({
       where: { name: 'ARISTA' },
@@ -43,7 +39,7 @@ async function main() {
     }),
   ])
 
-  // Categories
+  // Create Categories
   const categories = await Promise.all([
     prisma.category.upsert({
       where: { name: 'Produits' },
@@ -65,7 +61,7 @@ async function main() {
   const productsCategory = categories[0]
   const serverCategory = categories[1]
 
-  // Families
+  // Create Families for Products
   const families = await Promise.all([
     prisma.family.upsert({
       where: { name_category_id: { name: 'SWITCH', category_id: productsCategory.id } },
@@ -84,7 +80,7 @@ async function main() {
     }),
   ])
 
-  // Filters
+  // Create Filters
   const filters = await Promise.all([
     prisma.filter.upsert({
       where: { name: 'Ports' },
@@ -103,7 +99,7 @@ async function main() {
     }),
   ])
 
-  // Filter Values
+  // Create Filter Values
   const filterValues = await Promise.all([
     prisma.filterValue.upsert({
       where: { value_filter_id: { value: '24', filter_id: filters[0].id } },
@@ -137,7 +133,7 @@ async function main() {
     }),
   ])
 
-  // Products
+  // Create Products
   const products = await Promise.all([
     prisma.product.upsert({
       where: { name_brand_id_family_id: { name: 'ARISTA DCS-7010T-48-DC', brand_id: brands[0].id, family_id: families[0].id } },
@@ -177,7 +173,7 @@ async function main() {
     }),
   ])
 
-  // Configuration Options for Configurable Product
+  // Create Configuration Options for Configurable Products
   const configurableProduct = products[2]
   const cpuOption = await prisma.configurationOption.upsert({
     where: { name_product_id: { name: 'CPU', product_id: configurableProduct.id } },
@@ -191,7 +187,7 @@ async function main() {
     create: { name: 'Power Supplies', product_id: configurableProduct.id },
   })
 
-  // Configuration Values
+  // Create Configuration Values
   await Promise.all([
     prisma.configurationValue.upsert({
       where: { value_configuration_option_id: { value: 'DELL - Intel E5-2623v3 3.00GHz 4-Core 10M 105W', configuration_option_id: cpuOption.id } },
@@ -213,7 +209,7 @@ async function main() {
     }),
   ])
 
-  // Product Filter Values
+  // Create Product Filter Values
   await Promise.all([
     prisma.productFilterValue.upsert({
       where: { product_id_filter_value_id: { product_id: products[0].id, filter_value_id: filterValues[2].id } },
@@ -232,12 +228,12 @@ async function main() {
     }),
   ])
 
-  console.log('? Seeding completed successfully!')
+  console.log('✅ Seeding completed successfully!')
 }
 
 main()
   .catch((e) => {
-    console.error('? Seeding failed:', e)
+    console.error('❌ Seeding failed:', e)
     process.exit(1)
   })
   .finally(async () => {

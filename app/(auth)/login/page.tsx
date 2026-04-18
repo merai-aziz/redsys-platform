@@ -42,7 +42,7 @@ export default function LoginPage() {
 
       toast.success('Connexion réussie !')
       const role = json.user.role
-      if (role === 'ADMIN') window.location.assign('/admin/users')
+      if (role === 'ADMIN') window.location.assign('/admin/logs')
       else if (role === 'EMPLOYEE') window.location.assign('/employee/profile')
       else window.location.assign('/client/profile')
     } catch {

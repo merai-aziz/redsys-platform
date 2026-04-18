@@ -5,12 +5,16 @@ const publicRoutes = ['/login', '/register', '/']
 const adminRoutes = ['/admin']
 const employeeRoutes = ['/employee']
 
+function isPublicRoute(pathname: string) {
+  return publicRoutes.some((route) => pathname === route || pathname.startsWith(`${route}/`))
+}
+
 export async function proxy(request: NextRequest) {
   const { pathname } = request.nextUrl
   const accessToken = request.cookies.get('access_token')?.value
 
   // Routes publiques : laisser passer
-  if (publicRoutes.some(route => pathname.startsWith(route))) {
+  if (isPublicRoute(pathname)) {
     return NextResponse.next()
   }
 

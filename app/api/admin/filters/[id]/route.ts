@@ -1,0 +1,47 @@
+import { NextResponse } from 'next/server'
+
+import { requireAdmin } from '@/lib/auth'
+import { prisma } from '@/lib/prisma'
+
+interface Params {
+  params: Promise<{ id: string }>
+}
+
+export async function PUT(request: Request, context: Params) {
+  await requireAdmin(request)
+
+  const { id } = await context.params
+  const filterId = Number(id)
+
+  if (!Number.isInteger(filterId)) {
+    return NextResponse.json({ error: 'ID invalide' }, { status: 400 })
+  }
+
+  const body = (await request.json()) as { name?: string }
+  const name = body.name?.trim()
+
+  if (!name) {
+    return NextResponse.json({ error: 'Nom requis' }, { status: 400 })
+  }
+
+  const filter = await prisma.filter.update({
+    where: { id: filterId },
+    data: { name },
+  })
+
+  return NextResponse.json({ filter })
+}
+
+export async function DELETE(request: Request, context: Params) {
+  await requireAdmin(request)
+
+  const { id } = await context.params
+  const filterId = Number(id)
+
+  if (!Number.isInteger(filterId)) {
+    return NextResponse.json({ error: 'ID invalide' }, { status: 400 })
+  }
+
+  await prisma.filter.delete({ where: { id: filterId } })
+  return NextResponse.json({ success: true })
+}

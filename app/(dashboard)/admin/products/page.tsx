@@ -1,795 +1,610 @@
 'use client'
 
-import { useCallback, useEffect, useMemo, useState } from 'react'
-import { z } from 'zod'
-import { Loader2, Pencil, Plus, Search, Trash2 } from 'lucide-react'
+import { useEffect, useMemo, useState } from 'react'
 import { toast } from 'sonner'
 
-import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
-import {
-  Pagination,
-  PaginationContent,
-  PaginationItem,
-  PaginationLink,
-  PaginationNext,
-  PaginationPrevious,
-} from '@/components/ui/pagination'
-import { Separator } from '@/components/ui/separator'
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
 
-type ProductRow = {
-  id: string
-  equipmentModelId: string
-  sku: string
+interface Brand { id: number; name: string }
+interface Category { id: number; name: string }
+interface Family { id: number; name: string; category_id: number }
+
+interface Product {
+  id: number
   name: string
-  price: number
-  condition: 'A' | 'B' | 'C'
-  stock: number
-  isActive: boolean
-  equipmentModel: {
-    id: string
+  base_price: string
+  type: 'STANDARD' | 'CONFIGURABLE'
+  image_url?: string | null
+  description?: string | null
+  stock_qty: number
+  in_stock: boolean
+  poe: boolean
+  brand: Brand
+  category: Category
+  family: Family
+  specs: Array<{ id: number; spec_key: string; spec_value: string }>
+  configuration_options: Array<{
+    id: number
     name: string
-    domain: { label: string }
-    brand: { name: string }
-  }
-}
-
-type ProductListResponse = {
-  products: ProductRow[]
-  total: number
-  page: number
-  totalPages: number
-}
-
-type ModelSummary = {
-  id: string
-  name: string
-  reference: string
-  brandId: string
-  domainId: string
-  brand?: { id?: string; name: string } | null
-  domain?: { id?: string; label: string } | null
-}
-
-type ModelFilter = {
-  id: string
-  label: string
-  fieldKey: string
-  fieldType: 'TEXT' | 'NUMBER' | 'SELECT' | 'BOOLEAN'
-  options: Array<{ id: string; value: string; label: string }>
-}
-
-type ModelFiltersResponse = {
-  groups: Array<{
-    id: string
-    name: string
-    filters: ModelFilter[]
+    values: Array<{ id: number; value: string; price: string; quantity: number }>
   }>
 }
 
-type FormState = {
-  modelId: string
-  sku: string
-  name: string
-  price: string
-  condition: 'A' | 'B' | 'C'
-  stock: string
-  isActive: boolean
-  attributes: Record<string, string>
-}
-
-const formSchema = z.object({
-  modelId: z.string().min(1, 'Modele requis'),
-  sku: z.string().min(1, 'SKU requis'),
-  name: z.string().min(1, 'Nom requis'),
-  price: z.coerce.number().min(0, 'Prix invalide'),
-  condition: z.enum(['A', 'B', 'C']),
-  stock: z.coerce.number().int().min(0, 'Stock invalide'),
-})
-
-const emptyForm: FormState = {
-  modelId: '',
-  sku: '',
+const emptyForm = {
   name: '',
-  price: '',
-  condition: 'A',
-  stock: '0',
-  isActive: true,
-  attributes: {},
-}
-
-function conditionLabel(value: 'A' | 'B' | 'C') {
-  if (value === 'A') return 'RECONDITIONED'
-  if (value === 'B') return 'USED'
-  return 'NEW'
-}
-
-function conditionBadgeClass(value: 'A' | 'B' | 'C') {
-  if (value === 'A') return 'bg-emerald-100 text-emerald-700 hover:bg-emerald-100'
-  if (value === 'B') return 'bg-amber-100 text-amber-700 hover:bg-amber-100'
-  return 'bg-sky-100 text-sky-700 hover:bg-sky-100'
+  base_price: '0',
+  type: 'STANDARD' as 'STANDARD' | 'CONFIGURABLE',
+  image_url: '',
+  description: '',
+  stock_qty: '0',
+  in_stock: false,
+  poe: false,
+  brand_id: '',
+  category_id: '',
+  family_id: '',
 }
 
 export default function AdminProductsPage() {
-  const [products, setProducts] = useState<ProductRow[]>([])
-  const [total, setTotal] = useState(0)
-  const [page, setPage] = useState(1)
-  const [totalPages, setTotalPages] = useState(1)
+  const [products, setProducts] = useState<Product[]>([])
+  const [brands, setBrands] = useState<Brand[]>([])
+  const [categories, setCategories] = useState<Category[]>([])
+  const [families, setFamilies] = useState<Family[]>([])
 
-  const [models, setModels] = useState<ModelSummary[]>([])
-  const [modelSearch, setModelSearch] = useState('')
-  const [modelFilters, setModelFilters] = useState<ModelFilter[]>([])
+  const [form, setForm] = useState(emptyForm)
+  const [specRows, setSpecRows] = useState<Array<{ key: string; value: string }>>([{ key: '', value: '' }])
+  const [editingId, setEditingId] = useState<number | null>(null)
+  const [showDialog, setShowDialog] = useState(false)
 
-  const [loading, setLoading] = useState(true)
-  const [saving, setSaving] = useState(false)
-  const [deleting, setDeleting] = useState(false)
+  const [optionDialogProduct, setOptionDialogProduct] = useState<Product | null>(null)
+  const [optionName, setOptionName] = useState('')
+  const [optionValues, setOptionValues] = useState<Array<{ value: string; price: string; quantity: string }>>([{ value: '', price: '0', quantity: '1' }])
+  const [editingOptionId, setEditingOptionId] = useState<number | null>(null)
 
-  const [search, setSearch] = useState('')
-  const [selectedDomain, setSelectedDomain] = useState('')
-  const [selectedBrand, setSelectedBrand] = useState('')
-  const [selectedCondition, setSelectedCondition] = useState('')
-  const [inStockOnly, setInStockOnly] = useState(false)
+  async function loadAll() {
+    const [productsRes, brandsRes, categoriesRes, familiesRes] = await Promise.all([
+      fetch('/api/admin/products'),
+      fetch('/api/admin/brands'),
+      fetch('/api/admin/categories'),
+      fetch('/api/admin/families'),
+    ])
 
-  const [modalOpen, setModalOpen] = useState(false)
-  const [mode, setMode] = useState<'create' | 'edit'>('create')
-  const [step, setStep] = useState(1)
-  const [editProductId, setEditProductId] = useState<string | null>(null)
-  const [deleteTargetId, setDeleteTargetId] = useState<string | null>(null)
-  const [form, setForm] = useState<FormState>(emptyForm)
+    const [productsJson, brandsJson, categoriesJson, familiesJson] = await Promise.all([
+      productsRes.json(),
+      brandsRes.json(),
+      categoriesRes.json(),
+      familiesRes.json(),
+    ])
 
-  const domains = useMemo(() => {
-    const map = new Map<string, string>()
-    for (const model of models) {
-      if (!model.domainId) continue
-      map.set(model.domainId, model.domain?.label || 'Domaine')
-    }
-    return Array.from(map.entries()).map(([id, label]) => ({ id, label })).sort((a, b) => a.label.localeCompare(b.label))
-  }, [models])
+    setProducts(productsJson.products || [])
+    setBrands(brandsJson.brands || [])
+    setCategories(categoriesJson.categories || [])
+    setFamilies(familiesJson.families || [])
+  }
 
-  const brands = useMemo(() => {
-    const filtered = selectedDomain ? models.filter((model) => model.domainId === selectedDomain) : models
-    const map = new Map<string, string>()
-    for (const model of filtered) {
-      if (!model.brandId) continue
-      map.set(model.brandId, model.brand?.name || 'Marque')
-    }
-    return Array.from(map.entries()).map(([id, name]) => ({ id, name })).sort((a, b) => a.name.localeCompare(b.name))
-  }, [models, selectedDomain])
+  useEffect(() => {
+    let ignore = false
 
-  const visibleProducts = useMemo(() => {
-    if (!inStockOnly) return products
-    return products.filter((product) => product.stock > 0)
-  }, [inStockOnly, products])
-
-  const filteredModelOptions = useMemo(() => {
-    const q = modelSearch.trim().toLowerCase()
-    return models
-      .filter((model) => {
-        if (!q) return true
-        return `${model.name} ${model.reference}`.toLowerCase().includes(q)
-      })
-      .sort((a, b) => a.name.localeCompare(b.name))
-  }, [modelSearch, models])
-
-  const selectedModel = useMemo(() => models.find((model) => model.id === form.modelId) ?? null, [form.modelId, models])
-
-  const requestJson = useCallback(async <T,>(url: string, init?: RequestInit): Promise<T> => {
-    const res = await fetch(url, {
-      ...init,
-      headers: {
-        ...(init?.headers || {}),
-        ...(init?.body instanceof FormData ? {} : { 'Content-Type': 'application/json' }),
-      },
-    })
-
-    const data = await res.json().catch(() => ({}))
-    if (!res.ok) {
-      throw new Error(data.error || 'Erreur serveur')
+    async function bootstrap() {
+      if (!ignore) {
+        await loadAll()
+      }
     }
 
-    return data as T
+    void bootstrap()
+
+    return () => {
+      ignore = true
+    }
   }, [])
 
-  const loadModels = useCallback(async () => {
-    const data = await requestJson<{ models: ModelSummary[] }>('/api/admin/model')
-    setModels(data.models || [])
-  }, [requestJson])
+  const visibleFamilies = useMemo(() => {
+    const categoryId = Number(form.category_id)
+    if (!Number.isInteger(categoryId)) return []
+    return families.filter((family) => family.category_id === categoryId)
+  }, [families, form.category_id])
 
-  const loadProducts = useCallback(async () => {
-    setLoading(true)
-    try {
-      const params = new URLSearchParams({
-        page: String(page),
-        limit: '20',
-      })
-
-      if (selectedDomain) params.set('domain', selectedDomain)
-      if (selectedBrand) params.set('brand', selectedBrand)
-      if (selectedCondition) params.set('condition', selectedCondition)
-      if (search.trim()) params.set('search', search.trim())
-
-      const data = await requestJson<ProductListResponse>(`/api/admin/products?${params.toString()}`)
-      setProducts(data.products || [])
-      setTotal(data.total || 0)
-      setTotalPages(data.totalPages || 1)
-    } catch (error) {
-      toast.error(error instanceof Error ? error.message : 'Chargement impossible')
-    } finally {
-      setLoading(false)
-    }
-  }, [page, requestJson, search, selectedBrand, selectedCondition, selectedDomain])
-
-  useEffect(() => {
-    void loadModels().catch(() => {
-      toast.error('Chargement des modeles impossible')
-    })
-  }, [loadModels])
-
-  useEffect(() => {
-    void loadProducts()
-  }, [loadProducts])
-
-  useEffect(() => {
-    if (!form.modelId) {
-      setModelFilters([])
-      return
-    }
-
-    void requestJson<ModelFiltersResponse>(`/api/admin/model/${form.modelId}/filters`)
-      .then((data) => {
-        const all = data.groups.flatMap((group) => group.filters)
-        setModelFilters(all)
-
-        setForm((prev) => {
-          const nextAttributes: Record<string, string> = {}
-          for (const filter of all) {
-            nextAttributes[filter.fieldKey] = prev.attributes[filter.fieldKey] ?? ''
-          }
-          return { ...prev, attributes: nextAttributes }
-        })
-      })
-      .catch(() => {
-        toast.error('Chargement des filtres du modele impossible')
-      })
-  }, [form.modelId, requestJson])
-
-  function resetFilters() {
-    setSelectedDomain('')
-    setSelectedBrand('')
-    setSelectedCondition('')
-    setInStockOnly(false)
-    setSearch('')
-    setPage(1)
-  }
-
-  function openCreateModal() {
-    setMode('create')
-    setEditProductId(null)
+  function openCreate() {
+    setEditingId(null)
     setForm(emptyForm)
-    setModelSearch('')
-    setStep(1)
-    setModalOpen(true)
+    setSpecRows([{ key: '', value: '' }])
+    setShowDialog(true)
   }
 
-  function openEditModal(product: ProductRow) {
-    setMode('edit')
-    setEditProductId(product.id)
+  function openEdit(product: Product) {
+    setEditingId(product.id)
     setForm({
-      modelId: product.equipmentModelId,
-      sku: product.sku,
       name: product.name,
-      price: String(product.price),
-      condition: product.condition,
-      stock: String(product.stock),
-      isActive: product.isActive,
-      attributes: {},
+      base_price: String(product.base_price),
+      type: product.type,
+      image_url: product.image_url ?? '',
+      description: product.description ?? '',
+      stock_qty: String(product.stock_qty ?? 0),
+      in_stock: Boolean(product.in_stock),
+      poe: Boolean(product.poe),
+      brand_id: String(product.brand.id),
+      category_id: String(product.category.id),
+      family_id: String(product.family.id),
     })
-    setModelSearch('')
-    setStep(1)
-    setModalOpen(true)
+    setSpecRows(
+      product.specs.length > 0
+        ? product.specs.map((spec) => ({ key: spec.spec_key, value: spec.spec_value }))
+        : [{ key: '', value: '' }],
+    )
+    setShowDialog(true)
   }
 
-  async function toggleActive(product: ProductRow) {
-    try {
-      await requestJson(`/api/admin/products/${product.id}`, {
-        method: 'PUT',
-        body: JSON.stringify({ isActive: !product.isActive }),
-      })
-      setProducts((prev) => prev.map((item) => (item.id === product.id ? { ...item, isActive: !item.isActive } : item)))
-      toast.success('Statut mis a jour')
-    } catch (error) {
-      toast.error(error instanceof Error ? error.message : 'Mise a jour impossible')
+  async function saveProduct() {
+    const payload = {
+      ...form,
+      base_price: Number(form.base_price),
+      stock_qty: Number(form.stock_qty),
+      brand_id: Number(form.brand_id),
+      category_id: Number(form.category_id),
+      family_id: Number(form.family_id),
+      specs: form.type === 'STANDARD' ? specRows.filter((entry) => entry.key.trim() && entry.value.trim()) : [],
     }
-  }
 
-  async function submitForm() {
-    const parsed = formSchema.safeParse({
-      modelId: form.modelId,
-      sku: form.sku,
-      name: form.name,
-      price: form.price,
-      condition: form.condition,
-      stock: form.stock,
+    const url = editingId ? `/api/admin/products/${editingId}` : '/api/admin/products'
+    const method = editingId ? 'PUT' : 'POST'
+
+    const res = await fetch(url, {
+      method,
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
     })
 
-    if (!parsed.success) {
-      toast.error(parsed.error.issues[0]?.message || 'Validation invalide')
+    if (!res.ok) {
+      const data = await res.json().catch(() => null)
+      toast.error(data?.error || 'Enregistrement impossible')
       return
     }
 
-    setSaving(true)
-    try {
-      if (mode === 'create') {
-        await requestJson(`/api/admin/model/${form.modelId}/filters`, {
-          method: 'POST',
-          body: JSON.stringify({
-            kind: 'product',
-            sku: form.sku,
-            name: form.name,
-            price: Number(form.price),
-            condition: form.condition,
-            stock: Number(form.stock),
-            isActive: form.isActive,
-            attributes: Object.entries(form.attributes)
-              .filter(([, value]) => value.trim().length > 0)
-              .map(([fieldKey, value]) => ({ fieldKey, value })),
-          }),
-        })
-      } else if (editProductId) {
-        await requestJson(`/api/admin/products/${editProductId}`, {
-          method: 'PUT',
-          body: JSON.stringify({
-            price: Number(form.price),
-            stock: Number(form.stock),
-            condition: form.condition,
-            isActive: form.isActive,
-          }),
-        })
-      }
-
-      toast.success(mode === 'create' ? 'Produit cree' : 'Produit mis a jour')
-      setModalOpen(false)
-      await loadProducts()
-    } catch (error) {
-      toast.error(error instanceof Error ? error.message : 'Operation impossible')
-    } finally {
-      setSaving(false)
-    }
+    toast.success(editingId ? 'Produit modifie' : 'Produit cree')
+    setShowDialog(false)
+    await loadAll()
   }
 
-  async function confirmDelete() {
-    if (!deleteTargetId) return
+  async function removeProduct(product: Product) {
+    if (!confirm(`Supprimer ${product.name} ?`)) return
 
-    setDeleting(true)
-    try {
-      await requestJson(`/api/admin/products/${deleteTargetId}`, { method: 'DELETE' })
-      toast.success('Produit supprime')
-      setDeleteTargetId(null)
-      await loadProducts()
-    } catch (error) {
-      toast.error(error instanceof Error ? error.message : 'Suppression impossible')
-    } finally {
-      setDeleting(false)
+    const res = await fetch(`/api/admin/products/${product.id}`, { method: 'DELETE' })
+    if (!res.ok) {
+      const data = await res.json().catch(() => null)
+      toast.error(data?.error || 'Suppression impossible')
+      return
     }
+
+    toast.success('Produit supprime')
+    await loadAll()
+  }
+
+  async function addOption() {
+    if (!optionDialogProduct || !optionName.trim()) return
+
+    const cleanedValues = optionValues
+      .filter((entry) => entry.value.trim())
+      .map((entry) => ({
+        value: entry.value.trim(),
+        price: Number(entry.price || 0),
+        quantity: Math.max(1, Math.trunc(Number(entry.quantity || 1))),
+      }))
+
+    const res = await fetch(
+      editingOptionId
+        ? `/api/admin/products/${optionDialogProduct.id}/options/${editingOptionId}`
+        : `/api/admin/products/${optionDialogProduct.id}/options`,
+      {
+        method: editingOptionId ? 'PUT' : 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name: optionName.trim(), values: cleanedValues }),
+      },
+    )
+
+    if (!res.ok) {
+      const data = await res.json().catch(() => null)
+      toast.error(data?.error || 'Creation option impossible')
+      return
+    }
+
+    toast.success(editingOptionId ? 'Option modifiee' : 'Option ajoutee')
+    setEditingOptionId(null)
+    setOptionName('')
+    setOptionValues([{ value: '', price: '0', quantity: '1' }])
+    await loadAll()
+  }
+
+  function startEditOption(option: Product['configuration_options'][number]) {
+    setEditingOptionId(option.id)
+    setOptionName(option.name)
+    setOptionValues(
+      option.values.length > 0
+        ? option.values.map((value) => ({ value: value.value, price: String(value.price), quantity: String(value.quantity ?? 1) }))
+        : [{ value: '', price: '0', quantity: '1' }],
+    )
+  }
+
+  async function deleteOption(optionId: number) {
+    if (!optionDialogProduct) return
+    if (!confirm('Supprimer cette option ?')) return
+
+    const res = await fetch(`/api/admin/products/${optionDialogProduct.id}/options/${optionId}`, {
+      method: 'DELETE',
+    })
+
+    if (!res.ok) {
+      const data = await res.json().catch(() => null)
+      toast.error(data?.error || 'Suppression option impossible')
+      return
+    }
+
+    toast.success('Option supprimee')
+    if (editingOptionId === optionId) {
+      setEditingOptionId(null)
+      setOptionName('')
+      setOptionValues([{ value: '', price: '0', quantity: '1' }])
+    }
+    await loadAll()
   }
 
   return (
-    <div className="space-y-5">
-      <div className="flex flex-col gap-3 md:flex-row md:items-end md:justify-between">
+    <div className="space-y-6">
+      <div className="flex items-center justify-between gap-3">
         <div>
           <h1 className="text-2xl font-bold text-slate-900">Produits</h1>
-          <p className="mt-1 text-sm text-slate-500">Gestion des produits catalogues par modele et attributs.</p>
+          <p className="text-sm text-slate-500">Gestion des Product + ConfigurationOption + ProductFilterValue.</p>
         </div>
-        <div className="flex items-center gap-2">
-          <Badge className="bg-slate-100 text-slate-700 hover:bg-slate-100">{total} total</Badge>
-          <Button onClick={openCreateModal} className="bg-sky-600 text-white hover:bg-sky-700">
-            <Plus className="h-4 w-4" />
-            Ajouter un produit
-          </Button>
-        </div>
+        <Button onClick={openCreate}>Nouveau produit</Button>
       </div>
 
-      <Card className="border-slate-200 bg-white shadow-sm">
-        <CardContent className="grid gap-3 p-4 lg:grid-cols-6">
-          <select
-            value={selectedDomain}
-            onChange={(event) => {
-              setSelectedDomain(event.target.value)
-              setSelectedBrand('')
-              setPage(1)
-            }}
-            className="h-10 rounded-lg border border-slate-200 bg-slate-50 px-3 text-sm"
-          >
-            <option value="">Tous les domaines</option>
-            {domains.map((domain) => (
-              <option key={domain.id} value={domain.id}>{domain.label}</option>
-            ))}
-          </select>
-
-          <select
-            value={selectedBrand}
-            onChange={(event) => {
-              setSelectedBrand(event.target.value)
-              setPage(1)
-            }}
-            className="h-10 rounded-lg border border-slate-200 bg-slate-50 px-3 text-sm"
-          >
-            <option value="">Toutes les marques</option>
-            {brands.map((brand) => (
-              <option key={brand.id} value={brand.id}>{brand.name}</option>
-            ))}
-          </select>
-
-          <select
-            value={selectedCondition}
-            onChange={(event) => {
-              setSelectedCondition(event.target.value)
-              setPage(1)
-            }}
-            className="h-10 rounded-lg border border-slate-200 bg-slate-50 px-3 text-sm"
-          >
-            <option value="">Toutes conditions</option>
-            <option value="A">RECONDITIONED</option>
-            <option value="B">USED</option>
-            <option value="C">NEW</option>
-          </select>
-
-          <label className="inline-flex h-10 items-center gap-2 rounded-lg border border-slate-200 bg-slate-50 px-3 text-sm text-slate-700">
-            <input
-              type="checkbox"
-              checked={inStockOnly}
-              onChange={(event) => setInStockOnly(event.target.checked)}
-            />
-            En stock uniquement
-          </label>
-
-          <div className="relative lg:col-span-2">
-            <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
-            <Input
-              value={search}
-              onChange={(event) => {
-                setSearch(event.target.value)
-                setPage(1)
-              }}
-              placeholder="Rechercher SKU ou nom"
-              className="h-10 bg-slate-50 pl-9"
-            />
-          </div>
-
-          <Button variant="outline" onClick={resetFilters} className="lg:col-span-1">
-            Reset filtres
-          </Button>
-        </CardContent>
-      </Card>
-
-      <Card className="border-slate-200 bg-white shadow-sm">
+      <Card>
         <CardHeader>
-          <CardTitle>Liste produits</CardTitle>
-          <CardDescription>Actions rapides sur l activite, edition et suppression.</CardDescription>
+          <CardTitle>Liste</CardTitle>
+          <CardDescription>{products.length} produits dans le catalogue.</CardDescription>
         </CardHeader>
         <CardContent>
           <Table>
             <TableHeader>
               <TableRow>
-                <TableHead>SKU</TableHead>
                 <TableHead>Nom</TableHead>
-                <TableHead>Modele</TableHead>
-                <TableHead>Domaine</TableHead>
+                <TableHead>Type</TableHead>
+                <TableHead>Brand / Family</TableHead>
+                <TableHead>Stock / PoE</TableHead>
                 <TableHead>Prix</TableHead>
-                <TableHead>Condition</TableHead>
-                <TableHead>Stock</TableHead>
-                <TableHead>Actif</TableHead>
                 <TableHead className="text-right">Actions</TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
-              {loading ? (
-                <TableRow>
-                  <TableCell colSpan={9} className="py-12 text-center text-slate-500">
-                    <Loader2 className="mx-auto h-5 w-5 animate-spin text-sky-600" />
+              {products.map((product) => (
+                <TableRow key={product.id}>
+                  <TableCell className="font-medium">{product.name}</TableCell>
+                  <TableCell>{product.type}</TableCell>
+                  <TableCell>
+                    <p>{product.brand.name}</p>
+                    <p className="text-xs text-slate-500">{product.family.name} / {product.category.name}</p>
+                  </TableCell>
+                  <TableCell>
+                    <p className="text-sm">{product.in_stock ? `En stock (${product.stock_qty})` : 'Rupture'}</p>
+                    <p className="text-xs text-slate-500">PoE: {product.poe ? 'Oui' : 'Non'}</p>
+                  </TableCell>
+                  <TableCell>{Number(product.base_price).toFixed(2)} EUR</TableCell>
+                  <TableCell>
+                    <div className="flex justify-end gap-2">
+                      <Button variant="outline" size="sm" onClick={() => openEdit(product)}>Modifier</Button>
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        disabled={product.type !== 'CONFIGURABLE'}
+                        onClick={() => setOptionDialogProduct(product)}
+                      >
+                        Options
+                      </Button>
+                      <Button variant="outline" size="sm" onClick={() => removeProduct(product)}>Supprimer</Button>
+                    </div>
                   </TableCell>
                 </TableRow>
-              ) : visibleProducts.length === 0 ? (
-                <TableRow>
-                  <TableCell colSpan={9} className="py-12 text-center text-slate-500">Aucun produit.</TableCell>
-                </TableRow>
-              ) : (
-                visibleProducts.map((product) => (
-                  <TableRow key={product.id}>
-                    <TableCell className="font-medium text-slate-900">{product.sku}</TableCell>
-                    <TableCell>{product.name}</TableCell>
-                    <TableCell>{product.equipmentModel.name}</TableCell>
-                    <TableCell>{product.equipmentModel.domain.label}</TableCell>
-                    <TableCell>{Number(product.price).toLocaleString('fr-FR', { style: 'currency', currency: 'EUR' })}</TableCell>
-                    <TableCell>
-                      <Badge className={conditionBadgeClass(product.condition)}>{conditionLabel(product.condition)}</Badge>
-                    </TableCell>
-                    <TableCell>
-                      <Badge className={product.stock > 0 ? 'bg-emerald-100 text-emerald-700 hover:bg-emerald-100' : 'bg-rose-100 text-rose-700 hover:bg-rose-100'}>
-                        {product.stock > 0 ? `${product.stock}` : '0'}
-                      </Badge>
-                    </TableCell>
-                    <TableCell>
-                      <label className="inline-flex items-center gap-2 text-sm text-slate-700">
-                        <input
-                          type="checkbox"
-                          checked={product.isActive}
-                          onChange={() => void toggleActive(product)}
-                        />
-                        {product.isActive ? 'Oui' : 'Non'}
-                      </label>
-                    </TableCell>
-                    <TableCell>
-                      <div className="flex justify-end gap-2">
-                        <Button variant="outline" size="icon-sm" onClick={() => openEditModal(product)}>
-                          <Pencil className="h-3.5 w-3.5" />
-                        </Button>
-                        <Button variant="outline" size="icon-sm" className="text-rose-600" onClick={() => setDeleteTargetId(product.id)}>
-                          <Trash2 className="h-3.5 w-3.5" />
-                        </Button>
-                      </div>
-                    </TableCell>
-                  </TableRow>
-                ))
-              )}
+              ))}
             </TableBody>
           </Table>
-
-          <div className="mt-5">
-            <Pagination>
-              <PaginationContent>
-                <PaginationItem>
-                  <PaginationPrevious
-                    href="#"
-                    text="Precedent"
-                    onClick={(event) => {
-                      event.preventDefault()
-                      setPage((prev) => Math.max(1, prev - 1))
-                    }}
-                  />
-                </PaginationItem>
-
-                {Array.from({ length: totalPages }, (_, index) => index + 1)
-                  .slice(Math.max(0, page - 3), Math.min(totalPages, page + 2))
-                  .map((p) => (
-                    <PaginationItem key={p}>
-                      <PaginationLink
-                        href="#"
-                        isActive={p === page}
-                        onClick={(event) => {
-                          event.preventDefault()
-                          setPage(p)
-                        }}
-                      >
-                        {p}
-                      </PaginationLink>
-                    </PaginationItem>
-                  ))}
-
-                <PaginationItem>
-                  <PaginationNext
-                    href="#"
-                    text="Suivant"
-                    onClick={(event) => {
-                      event.preventDefault()
-                      setPage((prev) => Math.min(totalPages, prev + 1))
-                    }}
-                  />
-                </PaginationItem>
-              </PaginationContent>
-            </Pagination>
-          </div>
         </CardContent>
       </Card>
 
-      <Dialog open={modalOpen} onOpenChange={setModalOpen}>
-        <DialogContent className="max-h-[90vh] overflow-y-auto border-slate-200 bg-white sm:max-w-3xl">
+      <Dialog open={showDialog} onOpenChange={setShowDialog}>
+        <DialogContent className="max-h-[90vh] overflow-y-auto sm:max-w-2xl">
           <DialogHeader>
-            <DialogTitle>{mode === 'create' ? 'Ajouter un produit' : 'Editer un produit'}</DialogTitle>
+            <DialogTitle>{editingId ? 'Modifier le produit' : 'Nouveau produit'}</DialogTitle>
           </DialogHeader>
 
-          <div className="space-y-4">
-            <div className="flex items-center gap-2 text-xs uppercase tracking-[0.15em] text-slate-500">
-              <span className={step === 1 ? 'font-bold text-sky-700' : ''}>Etape 1</span>
-              <span>→</span>
-              <span className={step === 2 ? 'font-bold text-sky-700' : ''}>Etape 2</span>
-              <span>→</span>
-              <span className={step === 3 ? 'font-bold text-sky-700' : ''}>Etape 3</span>
+          <div className="grid gap-4 sm:grid-cols-2">
+            <div className="space-y-2 sm:col-span-2">
+              <Label>Nom</Label>
+              <Input value={form.name} onChange={(e) => setForm((prev) => ({ ...prev, name: e.target.value }))} />
             </div>
 
-            {step === 1 ? (
-              <div className="space-y-3">
-                <Label>Selectionner le modele</Label>
-                <Input
-                  value={modelSearch}
-                  onChange={(event) => setModelSearch(event.target.value)}
-                  placeholder="Rechercher un modele..."
-                  className="h-10"
-                />
-                <div className="max-h-56 space-y-2 overflow-y-auto rounded-lg border border-slate-200 p-2">
-                  {filteredModelOptions.map((model) => (
-                    <button
-                      key={model.id}
-                      type="button"
-                      onClick={() => setForm((prev) => ({ ...prev, modelId: model.id }))}
-                      className={`w-full rounded-md border px-3 py-2 text-left text-sm ${
-                        form.modelId === model.id ? 'border-sky-300 bg-sky-50 text-sky-800' : 'border-slate-200 hover:bg-slate-50'
-                      }`}
-                    >
-                      <p className="font-semibold">{model.name}</p>
-                      <p className="text-xs text-slate-500">{model.reference}</p>
-                    </button>
+            <div className="space-y-2">
+              <Label>Prix de base</Label>
+              <Input
+                type="number"
+                step="0.01"
+                value={form.base_price}
+                onChange={(e) => setForm((prev) => ({ ...prev, base_price: e.target.value }))}
+              />
+            </div>
+
+            <div className="space-y-2">
+              <Label>Type</Label>
+              <select
+                className="h-10 w-full rounded border border-slate-200 bg-white px-3 text-sm"
+                value={form.type}
+                onChange={(e) => {
+                  const nextType = e.target.value as 'STANDARD' | 'CONFIGURABLE'
+                  setForm((prev) => ({ ...prev, type: nextType }))
+                }}
+              >
+                <option value="STANDARD">STANDARD</option>
+                <option value="CONFIGURABLE">CONFIGURABLE</option>
+              </select>
+            </div>
+
+            <div className="space-y-2 sm:col-span-2">
+              <Label>Image URL</Label>
+              <Input
+                value={form.image_url}
+                onChange={(e) => setForm((prev) => ({ ...prev, image_url: e.target.value }))}
+                placeholder="https://..."
+              />
+            </div>
+
+            <div className="space-y-2 sm:col-span-2">
+              <Label>Description</Label>
+              <textarea
+                className="min-h-20 w-full rounded border border-slate-200 bg-white px-3 py-2 text-sm"
+                value={form.description}
+                onChange={(e) => setForm((prev) => ({ ...prev, description: e.target.value }))}
+                placeholder="Description détaillée du produit (optionnel)"
+              />
+            </div>
+
+            <div className="space-y-2">
+              <Label>Quantite stock</Label>
+              <Input
+                type="number"
+                min="0"
+                value={form.stock_qty}
+                onChange={(e) => setForm((prev) => ({ ...prev, stock_qty: e.target.value }))}
+              />
+            </div>
+
+            <div className="space-y-2">
+              <Label>Disponibilite</Label>
+              <div className="flex h-10 items-center gap-5 rounded border border-slate-200 bg-white px-3 text-sm">
+                <label className="flex items-center gap-2">
+                  <input
+                    type="checkbox"
+                    checked={form.in_stock}
+                    onChange={(e) => setForm((prev) => ({ ...prev, in_stock: e.target.checked }))}
+                  />
+                  En stock
+                </label>
+                <label className="flex items-center gap-2">
+                  <input
+                    type="checkbox"
+                    checked={form.poe}
+                    onChange={(e) => setForm((prev) => ({ ...prev, poe: e.target.checked }))}
+                  />
+                  PoE
+                </label>
+              </div>
+            </div>
+
+            <div className="space-y-2">
+              <Label>Brand</Label>
+              <select
+                className="h-10 w-full rounded border border-slate-200 bg-white px-3 text-sm"
+                value={form.brand_id}
+                onChange={(e) => setForm((prev) => ({ ...prev, brand_id: e.target.value }))}
+              >
+                <option value="">Selectionner</option>
+                {brands.map((brand) => (
+                  <option key={brand.id} value={brand.id}>{brand.name}</option>
+                ))}
+              </select>
+            </div>
+
+            <div className="space-y-2">
+              <Label>Category</Label>
+              <select
+                className="h-10 w-full rounded border border-slate-200 bg-white px-3 text-sm"
+                value={form.category_id}
+                onChange={(e) => setForm((prev) => ({ ...prev, category_id: e.target.value, family_id: '' }))}
+              >
+                <option value="">Selectionner</option>
+                {categories.map((category) => (
+                  <option key={category.id} value={category.id}>{category.name}</option>
+                ))}
+              </select>
+            </div>
+
+            <div className="space-y-2">
+              <Label>Family</Label>
+              <select
+                className="h-10 w-full rounded border border-slate-200 bg-white px-3 text-sm"
+                value={form.family_id}
+                onChange={(e) => setForm((prev) => ({ ...prev, family_id: e.target.value }))}
+              >
+                <option value="">Selectionner</option>
+                {visibleFamilies.map((family) => (
+                  <option key={family.id} value={family.id}>{family.name}</option>
+                ))}
+              </select>
+            </div>
+
+            {form.type === 'STANDARD' && (
+              <div className="space-y-2 sm:col-span-2">
+                <Label>Specifications (produit standard)</Label>
+                <div className="space-y-2 rounded border p-2">
+                  {specRows.map((entry, index) => (
+                    <div key={index} className="grid grid-cols-[1fr_1fr_auto] gap-2">
+                      <Input
+                        value={entry.key}
+                        placeholder="Ex: CPU"
+                        onChange={(e) => {
+                          setSpecRows((prev) => {
+                            const next = [...prev]
+                            next[index] = { ...next[index], key: e.target.value }
+                            return next
+                          })
+                        }}
+                      />
+                      <Input
+                        value={entry.value}
+                        placeholder="Ex: Intel Xeon"
+                        onChange={(e) => {
+                          setSpecRows((prev) => {
+                            const next = [...prev]
+                            next[index] = { ...next[index], value: e.target.value }
+                            return next
+                          })
+                        }}
+                      />
+                      <Button
+                        type="button"
+                        variant="outline"
+                        onClick={() => {
+                          setSpecRows((prev) => prev.length > 1 ? prev.filter((_, rowIndex) => rowIndex !== index) : [{ key: '', value: '' }])
+                        }}
+                      >
+                        Suppr.
+                      </Button>
+                    </div>
                   ))}
+                  <Button type="button" variant="outline" onClick={() => setSpecRows((prev) => [...prev, { key: '', value: '' }])}>
+                    Ajouter une spec
+                  </Button>
                 </div>
               </div>
-            ) : null}
-
-            {step === 2 ? (
-              <div className="grid gap-4 md:grid-cols-2">
-                <div>
-                  <Label>SKU</Label>
-                  <Input
-                    value={form.sku}
-                    onChange={(event) => setForm((prev) => ({ ...prev, sku: event.target.value }))}
-                    className="mt-2 h-10"
-                    disabled={mode === 'edit'}
-                  />
-                </div>
-                <div>
-                  <Label>Nom</Label>
-                  <Input
-                    value={form.name}
-                    onChange={(event) => setForm((prev) => ({ ...prev, name: event.target.value }))}
-                    className="mt-2 h-10"
-                    disabled={mode === 'edit'}
-                  />
-                </div>
-                <div>
-                  <Label>Prix</Label>
-                  <Input
-                    type="number"
-                    value={form.price}
-                    onChange={(event) => setForm((prev) => ({ ...prev, price: event.target.value }))}
-                    className="mt-2 h-10"
-                  />
-                </div>
-                <div>
-                  <Label>Condition</Label>
-                  <select
-                    value={form.condition}
-                    onChange={(event) => setForm((prev) => ({ ...prev, condition: event.target.value as 'A' | 'B' | 'C' }))}
-                    className="mt-2 h-10 w-full rounded-lg border border-slate-200 bg-white px-3 text-sm"
-                  >
-                    <option value="A">RECONDITIONED</option>
-                    <option value="B">USED</option>
-                    <option value="C">NEW</option>
-                  </select>
-                </div>
-                <div>
-                  <Label>Stock</Label>
-                  <Input
-                    type="number"
-                    value={form.stock}
-                    onChange={(event) => setForm((prev) => ({ ...prev, stock: event.target.value }))}
-                    className="mt-2 h-10"
-                  />
-                </div>
-                <div>
-                  <Label>Actif</Label>
-                  <label className="mt-2 inline-flex h-10 items-center gap-2 rounded-lg border border-slate-200 px-3 text-sm text-slate-700">
-                    <input
-                      type="checkbox"
-                      checked={form.isActive}
-                      onChange={(event) => setForm((prev) => ({ ...prev, isActive: event.target.checked }))}
-                    />
-                    {form.isActive ? 'Oui' : 'Non'}
-                  </label>
-                </div>
-              </div>
-            ) : null}
-
-            {step === 3 ? (
-              <div className="space-y-3">
-                <p className="text-sm text-slate-600">
-                  {mode === 'edit'
-                    ? 'Edition des attributs disponible dans Admin Catalog. Ici, les attributs sont en lecture.'
-                    : 'Renseigner les attributs du produit selon les filtres du modele selectionne.'}
-                </p>
-
-                <Separator />
-
-                {modelFilters.length === 0 ? (
-                  <p className="text-sm text-slate-500">Aucun filtre disponible pour ce modele.</p>
-                ) : (
-                  <div className="grid gap-3">
-                    {modelFilters.map((filter) => (
-                      <div key={filter.id} className="grid gap-2 md:grid-cols-[0.9fr_1.1fr] md:items-center">
-                        <Label>{filter.label}</Label>
-                        {filter.fieldType === 'SELECT' && filter.options.length > 0 ? (
-                          <select
-                            value={form.attributes[filter.fieldKey] ?? ''}
-                            onChange={(event) =>
-                              setForm((prev) => ({
-                                ...prev,
-                                attributes: { ...prev.attributes, [filter.fieldKey]: event.target.value },
-                              }))
-                            }
-                            className="h-10 w-full rounded-lg border border-slate-200 bg-white px-3 text-sm"
-                            disabled={mode === 'edit'}
-                          >
-                            <option value="">Choisir</option>
-                            {filter.options.map((option) => (
-                              <option key={option.id} value={option.value}>{option.label}</option>
-                            ))}
-                          </select>
-                        ) : (
-                          <Input
-                            value={form.attributes[filter.fieldKey] ?? ''}
-                            onChange={(event) =>
-                              setForm((prev) => ({
-                                ...prev,
-                                attributes: { ...prev.attributes, [filter.fieldKey]: event.target.value },
-                              }))
-                            }
-                            className="h-10"
-                            disabled={mode === 'edit'}
-                          />
-                        )}
-                      </div>
-                    ))}
-                  </div>
-                )}
-              </div>
-            ) : null}
+            )}
           </div>
 
           <DialogFooter>
-            <Button variant="outline" onClick={() => setModalOpen(false)}>Annuler</Button>
-            <div className="ml-auto flex gap-2">
-              <Button variant="outline" disabled={step === 1} onClick={() => setStep((prev) => Math.max(1, prev - 1))}>
-                Retour
-              </Button>
-              {step < 3 ? (
-                <Button
-                  onClick={() => {
-                    if (step === 1 && !form.modelId) {
-                      toast.error('Selectionnez un modele')
-                      return
-                    }
-                    setStep((prev) => Math.min(3, prev + 1))
-                  }}
-                  className="bg-sky-600 text-white hover:bg-sky-700"
-                >
-                  Suivant
-                </Button>
-              ) : (
-                <Button onClick={() => void submitForm()} disabled={saving} className="bg-sky-600 text-white hover:bg-sky-700">
-                  {saving ? <Loader2 className="h-4 w-4 animate-spin" /> : null}
-                  {mode === 'create' ? 'Creer' : 'Sauvegarder'}
-                </Button>
-              )}
-            </div>
+            <Button variant="outline" onClick={() => setShowDialog(false)}>Annuler</Button>
+            <Button onClick={saveProduct}>Enregistrer</Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
 
-      <Dialog open={Boolean(deleteTargetId)} onOpenChange={(open) => !open && setDeleteTargetId(null)}>
-        <DialogContent className="border-slate-200 bg-white sm:max-w-md">
+      <Dialog
+        open={Boolean(optionDialogProduct)}
+        onOpenChange={(open) => {
+          if (open) return
+          setOptionDialogProduct(null)
+          setEditingOptionId(null)
+          setOptionName('')
+          setOptionValues([{ value: '', price: '0', quantity: '1' }])
+        }}
+      >
+        <DialogContent className="max-h-[90vh] overflow-y-auto sm:max-w-2xl">
           <DialogHeader>
-            <DialogTitle>Confirmer la suppression</DialogTitle>
+            <DialogTitle>
+              Options configurables {optionDialogProduct ? `- ${optionDialogProduct.name}` : ''}
+            </DialogTitle>
           </DialogHeader>
-          <p className="text-sm text-slate-600">Cette action supprimera le produit et ses attributs associes.</p>
+
+          <div className="space-y-3">
+            <Label>Nom de l option</Label>
+            <Input value={optionName} onChange={(e) => setOptionName(e.target.value)} placeholder="Ex: CPU" />
+
+            {optionValues.map((entry, index) => (
+              <div key={index} className="grid grid-cols-[1fr_120px_100px] gap-2">
+                <Input
+                  value={entry.value}
+                  placeholder="Valeur"
+                  onChange={(e) => {
+                    setOptionValues((prev) => {
+                      const next = [...prev]
+                      next[index] = { ...next[index], value: e.target.value }
+                      return next
+                    })
+                  }}
+                />
+                <Input
+                  type="number"
+                  step="0.01"
+                  value={entry.price}
+                  placeholder="Prix"
+                  onChange={(e) => {
+                    setOptionValues((prev) => {
+                      const next = [...prev]
+                      next[index] = { ...next[index], price: e.target.value }
+                      return next
+                    })
+                  }}
+                />
+                <Input
+                  type="number"
+                  min="1"
+                  value={entry.quantity}
+                  placeholder="Qte"
+                  onChange={(e) => {
+                    setOptionValues((prev) => {
+                      const next = [...prev]
+                      next[index] = { ...next[index], quantity: e.target.value }
+                      return next
+                    })
+                  }}
+                />
+              </div>
+            ))}
+
+            <div className="flex gap-2">
+              <Button
+                variant="outline"
+                onClick={() => setOptionValues((prev) => [...prev, { value: '', price: '0', quantity: '1' }])}
+              >
+                Ajouter une ligne
+              </Button>
+              {editingOptionId && (
+                <Button
+                  variant="outline"
+                  onClick={() => {
+                    setEditingOptionId(null)
+                    setOptionName('')
+                    setOptionValues([{ value: '', price: '0', quantity: '1' }])
+                  }}
+                >
+                  Annuler edition
+                </Button>
+              )}
+              <Button onClick={addOption}>{editingOptionId ? 'Enregistrer option' : 'Ajouter option'}</Button>
+            </div>
+
+            <div className="rounded border p-3">
+              <p className="mb-2 text-sm font-medium text-slate-700">Options existantes</p>
+              <div className="space-y-2">
+                {optionDialogProduct?.configuration_options.map((option) => (
+                  <div key={option.id} className="rounded border p-2 text-sm">
+                    <div className="flex items-center justify-between gap-2">
+                      <p className="font-medium">{option.name}</p>
+                      <div className="flex gap-2">
+                        <Button variant="outline" size="sm" onClick={() => startEditOption(option)}>Modifier</Button>
+                        <Button variant="outline" size="sm" onClick={() => deleteOption(option.id)}>Supprimer</Button>
+                      </div>
+                    </div>
+                    <p className="text-xs text-slate-500">
+                      {option.values.map((value) => `${value.value} x${value.quantity} (+${Number(value.price).toFixed(2)})`).join(', ')}
+                    </p>
+                  </div>
+                ))}
+              </div>
+            </div>
+          </div>
+
           <DialogFooter>
-            <Button variant="outline" onClick={() => setDeleteTargetId(null)}>Annuler</Button>
-            <Button onClick={() => void confirmDelete()} disabled={deleting} className="bg-rose-600 text-white hover:bg-rose-700">
-              {deleting ? <Loader2 className="h-4 w-4 animate-spin" /> : null}
-              Supprimer
-            </Button>
+            <Button variant="outline" onClick={() => setOptionDialogProduct(null)}>Fermer</Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>

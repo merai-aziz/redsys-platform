@@ -1,116 +1,121 @@
-import { Prisma } from '@prisma/client'
-import { NextRequest, NextResponse } from 'next/server'
-import { z } from 'zod'
+import { NextResponse } from 'next/server'
 
 import { requireAdmin } from '@/lib/auth'
 import { prisma } from '@/lib/prisma'
 
-const querySchema = z.object({
-  page: z.coerce.number().int().min(1).default(1),
-  limit: z.coerce.number().int().min(1).max(100).default(20),
-  domain: z.string().trim().optional(),
-  brand: z.string().trim().optional(),
-  condition: z.enum(['A', 'B', 'C']).optional(),
-  modelId: z.string().trim().optional(),
-  isActive: z.enum(['true', 'false']).optional(),
-  search: z.string().trim().optional(),
-})
+export async function GET(request: Request) {
+  await requireAdmin(request)
 
-export async function GET(request: NextRequest) {
-  try {
-    await requireAdmin(request)
-
-    const parsed = querySchema.safeParse({
-      page: request.nextUrl.searchParams.get('page') ?? '1',
-      limit: request.nextUrl.searchParams.get('limit') ?? '20',
-      domain: request.nextUrl.searchParams.get('domain') ?? undefined,
-      brand: request.nextUrl.searchParams.get('brand') ?? undefined,
-      condition: request.nextUrl.searchParams.get('condition') ?? undefined,
-      modelId: request.nextUrl.searchParams.get('modelId') ?? undefined,
-      isActive: request.nextUrl.searchParams.get('isActive') ?? undefined,
-      search: request.nextUrl.searchParams.get('search') ?? undefined,
-    })
-
-    if (!parsed.success) {
-      return NextResponse.json(
-        { error: 'Parametres invalides', details: parsed.error.flatten() },
-        { status: 400 },
-      )
-    }
-
-    const { page, limit, domain, brand, condition, modelId, isActive, search } = parsed.data
-
-    const where: Prisma.ProductWhereInput = {
-      ...(modelId ? { equipmentModelId: modelId } : {}),
-      ...(condition ? { condition } : {}),
-      ...(isActive !== undefined ? { isActive: isActive === 'true' } : {}),
-      ...(search
-        ? {
-            OR: [
-              { sku: { contains: search, mode: 'insensitive' } },
-              { name: { contains: search, mode: 'insensitive' } },
-            ],
-          }
-        : {}),
-      ...((domain || brand)
-        ? {
-            equipmentModel: {
-              ...(domain
-                ? {
-                    OR: [
-                      { domainId: domain },
-                      { domain: { slug: domain } },
-                    ],
-                  }
-                : {}),
-              ...(brand
-                ? {
-                    AND: [
-                      {
-                        OR: [
-                          { brandId: brand },
-                          { brand: { slug: brand } },
-                        ],
-                      },
-                    ],
-                  }
-                : {}),
-            },
-          }
-        : {}),
-    }
-
-    const skip = (page - 1) * limit
-
-    const [products, total] = await Promise.all([
-      prisma.product.findMany({
-        where,
+  const products = await prisma.product.findMany({
+    orderBy: [{ category_id: 'asc' }, { family_id: 'asc' }, { name: 'asc' }],
+    include: {
+      brand: true,
+      family: true,
+      category: true,
+      configuration_options: {
+        include: { values: true },
+      },
+      specs: {
+        orderBy: [{ spec_key: 'asc' }, { spec_value: 'asc' }],
+      },
+      product_filter_values: {
         include: {
-          equipmentModel: {
-            select: {
-              id: true,
-              name: true,
-              domain: { select: { label: true } },
-              brand: { select: { name: true } },
-            },
+          filter_value: {
+            include: { filter: true },
           },
         },
-        orderBy: { createdAt: 'desc' },
-        skip,
-        take: limit,
-      }),
-      prisma.product.count({ where }),
-    ])
+      },
+    },
+  })
 
-    return NextResponse.json({
-      products,
-      total,
-      page,
-      totalPages: Math.max(1, Math.ceil(total / limit)),
-    })
-  } catch (error) {
-    if (error instanceof Response) return error
-    console.error('GET /api/admin/products error', error)
-    return NextResponse.json({ error: 'Erreur serveur' }, { status: 500 })
+  return NextResponse.json({ products })
+}
+
+export async function POST(request: Request) {
+  await requireAdmin(request)
+
+  const body = (await request.json()) as {
+    name?: string
+    base_price?: number | string
+    type?: 'STANDARD' | 'CONFIGURABLE'
+    brand_id?: number
+    family_id?: number
+    category_id?: number
+    image_url?: string | null
+    description?: string | null
+    stock_qty?: number
+    in_stock?: boolean
+    poe?: boolean
+    filter_value_ids?: number[]
+    specs?: Array<{ key?: string; value?: string }>
   }
+
+  const name = body.name?.trim()
+  const basePrice = Number(body.base_price)
+  const brandId = Number(body.brand_id)
+  const familyId = Number(body.family_id)
+  const categoryId = Number(body.category_id)
+  const type = body.type
+  const imageUrl = body.image_url?.trim() || null
+  const description = body.description?.trim() || null
+  const stockQty = Number(body.stock_qty ?? 0)
+  const inStock = Boolean(body.in_stock)
+  const poe = Boolean(body.poe)
+
+  if (
+    !name
+    || !Number.isFinite(basePrice)
+    || !Number.isInteger(brandId)
+    || !Number.isInteger(familyId)
+    || !Number.isInteger(categoryId)
+    || !Number.isFinite(stockQty)
+    || stockQty < 0
+    || (type !== 'STANDARD' && type !== 'CONFIGURABLE')
+  ) {
+    return NextResponse.json({ error: 'Champs invalides' }, { status: 400 })
+  }
+
+  const filterValueIds = Array.isArray(body.filter_value_ids)
+    ? body.filter_value_ids.filter((id): id is number => Number.isInteger(id))
+    : []
+
+  const specs = Array.isArray(body.specs)
+    ? body.specs
+      .map((entry) => ({
+        key: entry.key?.trim() ?? '',
+        value: entry.value?.trim() ?? '',
+      }))
+      .filter((entry) => entry.key && entry.value)
+    : []
+
+  const normalizedStock = inStock ? Math.max(1, Math.trunc(stockQty)) : 0
+
+  const product = await prisma.product.create({
+    data: {
+      name,
+      base_price: basePrice,
+      type,
+      image_url: imageUrl,
+      description,
+      stock_qty: normalizedStock,
+      in_stock: normalizedStock > 0,
+      poe,
+      brand_id: brandId,
+      family_id: familyId,
+      category_id: categoryId,
+      product_filter_values: type === 'CONFIGURABLE' ? {
+        create: filterValueIds.map((filterValueId) => ({
+          filter_value_id: filterValueId,
+        })),
+      } : undefined,
+      specs: type === 'STANDARD' ? {
+        create: specs.map((entry) => ({
+          spec_key: entry.key,
+          spec_value: entry.value,
+        })),
+      } : undefined,
+    },
+  })
+
+  return NextResponse.json({ product }, { status: 201 })
 }
