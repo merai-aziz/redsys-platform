@@ -1,4 +1,5 @@
 ﻿import { NextResponse } from 'next/server'
+import { Prisma } from '@prisma/client'
 
 import { prisma } from '@/lib/prisma'
 
@@ -23,9 +24,24 @@ type Series = {
   name: string
   image: string | null
   description: string | null
+  familyId: string
   brandId: string
   domainId: string
   sortOrder: number
+}
+
+type FamilyFilter = {
+  familyId: string
+  filters: Array<{
+    name: string
+    values: string[]
+  }>
+}
+
+type FamilyFilterLinkRow = {
+  family_id: number
+  filter_name: string
+  filter_value: string | null
 }
 
 type Model = {
@@ -41,9 +57,17 @@ type Model = {
   condition: string | null
   poe: boolean
   specs: Array<{ key: string; value: string }>
+  brandName: string
+  familyName: string
+  categoryName: string
   seriesId: string
   brandId: string
   domainId: string
+}
+
+type CompatibilityLink = {
+  partProductId: string
+  targetProductId: string
 }
 
 type Sku = {
@@ -88,16 +112,43 @@ export async function GET(request: Request) {
   const inStock = searchParams.get('inStock')
   const spec = searchParams.get('spec')?.trim().toLowerCase() || ''
 
-  const products = await prisma.product.findMany({
-    include: {
-      brand: true,
-      family: {
-        include: { category: true },
-      },
-      specs: true,
+  const familyFilterLinksPromise = prisma.$queryRaw<FamilyFilterLinkRow[]>`
+    SELECT
+      ff.family_id,
+      f.name AS filter_name,
+      fv.value AS filter_value
+    FROM family_filters ff
+    INNER JOIN catalog_filters f ON f.id = ff.filter_id
+    LEFT JOIN filter_values fv ON fv.filter_id = f.id
+    ORDER BY ff.family_id ASC, ff.sort_order ASC, f.name ASC, fv.value ASC
+  `
+
+  const compatibilityRowsPromise = prisma.productCompatibility.findMany({
+    select: {
+      part_product_id: true,
+      target_product_id: true,
     },
-    orderBy: [{ category_id: 'asc' }, { family_id: 'asc' }, { name: 'asc' }],
+  }).catch((error: unknown) => {
+    if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2021') {
+      return []
+    }
+    throw error
   })
+
+  const [products, familyFilterLinks, compatibilityRows] = await Promise.all([
+    prisma.product.findMany({
+      include: {
+        brand: true,
+        family: {
+          include: { category: true },
+        },
+        specs: true,
+      },
+      orderBy: [{ category_id: 'asc' }, { family_id: 'asc' }, { name: 'asc' }],
+    }),
+    familyFilterLinksPromise,
+    compatibilityRowsPromise,
+  ])
 
   const rows = products.map((product: typeof products[0]) => {
     const domain = detectDomain(product.family.category.name, product.family.name, product.name, product.type)
@@ -155,6 +206,7 @@ export async function GET(request: Request) {
           name: row.product.family.name,
           image: null,
           description: row.product.family.category.name,
+          familyId: String(row.product.family.id),
           brandId: String(row.product.brand.id),
           domainId: row.domain.id,
           sortOrder: row.product.family.id,
@@ -178,6 +230,9 @@ export async function GET(request: Request) {
     condition: row.product.type,
     poe: row.product.poe,
     specs: row.product.specs.map((entry) => ({ key: entry.spec_key, value: entry.spec_value })),
+    brandName: row.product.brand.name,
+    familyName: row.product.family.name,
+    categoryName: row.product.family.category.name,
     seriesId: row.seriesIdValue,
     brandId: String(row.product.brand.id),
     domainId: row.domain.id,
@@ -192,5 +247,34 @@ export async function GET(request: Request) {
     condition: row.product.type,
   }))
 
-  return NextResponse.json({ domains, brands, series, models, skus })
+  const familyFilterMap = new Map<number, Map<string, Set<string>>>()
+  familyFilterLinks.forEach((link) => {
+    const filtersForFamily = familyFilterMap.get(link.family_id) ?? new Map<string, Set<string>>()
+    const valuesForFilter = filtersForFamily.get(link.filter_name) ?? new Set<string>()
+
+    if (link.filter_value) {
+      valuesForFilter.add(link.filter_value)
+    }
+
+    filtersForFamily.set(link.filter_name, valuesForFilter)
+    familyFilterMap.set(link.family_id, filtersForFamily)
+  })
+
+  const familyFilters: FamilyFilter[] = Array.from(familyFilterMap.entries()).map(([familyId, filtersMap]) => ({
+    familyId: String(familyId),
+    filters: Array.from(filtersMap.entries()).map(([name, values]) => ({
+      name,
+      values: Array.from(values.values()),
+    })),
+  }))
+
+  const visibleProductIds = new Set(filteredRows.map((row) => row.product.id))
+  const compatibilities: CompatibilityLink[] = compatibilityRows
+    .filter((row) => visibleProductIds.has(row.part_product_id) && visibleProductIds.has(row.target_product_id))
+    .map((row) => ({
+      partProductId: String(row.part_product_id),
+      targetProductId: String(row.target_product_id),
+    }))
+
+  return NextResponse.json({ domains, brands, series, models, skus, familyFilters, compatibilities })
 }

@@ -5,10 +5,21 @@ import Image from 'next/image'
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import {
+  ArrowLeft,
+  ArrowUpRight,
+  Boxes,
+  Clock3,
   ChevronDown,
   ChevronRight,
+  HardDrive,
+  MessageSquare,
+  Network,
   Search,
+  Server,
+  ShieldCheck,
   ShoppingCart,
+  Sliders,
+  Star,
   Globe,
   Phone,
   User,
@@ -30,7 +41,7 @@ import {
 
 interface Domain { id: string; code: string; name: string; icon?: string | null; displayOrder: number }
 interface Brand { id: string; name: string; logo?: string | null; domainId: string; sortOrder: number }
-interface Series { id: string; name: string; image?: string | null; description?: string | null; brandId: string; domainId: string; sortOrder: number }
+interface Series { id: string; name: string; image?: string | null; description?: string | null; familyId: string; brandId: string; domainId: string; sortOrder: number }
 interface Model {
   id: string
   name: string
@@ -44,20 +55,138 @@ interface Model {
   condition?: string | null
   poe?: boolean
   specs?: Array<{ key: string; value: string }>
+  brandName?: string
+  familyName?: string
+  categoryName?: string
   seriesId: string
   brandId: string
   domainId: string
 }
 interface SKU { id: string; sku: string; modelId: string; price: number; stock: number; condition: string }
+interface CompatibilityLink { partProductId: string; targetProductId: string }
+interface FamilyFilterDefinition {
+  familyId: string
+  filters: Array<{
+    name: string
+    values: string[]
+  }>
+}
 interface CatalogPayload {
   domains: Domain[]
   brands: Brand[]
   series: Series[]
   models: Model[]
   skus: SKU[]
+  familyFilters: FamilyFilterDefinition[]
+  compatibilities: CompatibilityLink[]
+}
+
+interface StandardSpecFilterGroup {
+  key: string
+  options: Array<{ value: string; count: number }>
 }
 
 type MenuKind = 'products' | 'server' | 'storage' | 'network'
+
+const BrandIcons: Record<string, (props: { className?: string }) => React.JSX.Element> = {
+  cisco: ({ className = '' }) => (
+    <svg className={className} viewBox="0 0 100 100" fill="none" xmlns="http://www.w3.org/2000/svg">
+      <rect width="100" height="100" rx="16" fill="currentColor" opacity="0.1" />
+      <g transform="translate(20, 35)">
+        <rect x="0" y="0" width="6" height="30" fill="currentColor" rx="2" />
+        <rect x="10" y="5" width="6" height="25" fill="currentColor" rx="2" />
+        <rect x="20" y="0" width="6" height="30" fill="currentColor" rx="2" />
+        <rect x="30" y="10" width="6" height="20" fill="currentColor" rx="2" />
+        <rect x="40" y="5" width="6" height="25" fill="currentColor" rx="2" />
+      </g>
+    </svg>
+  ),
+  dell: ({ className = '' }) => (
+    <svg className={className} viewBox="0 0 100 100" fill="none" xmlns="http://www.w3.org/2000/svg">
+      <rect width="100" height="100" rx="16" fill="currentColor" opacity="0.1" />
+      <path
+        d="M 30 40 Q 30 30 40 30 L 60 30 Q 70 30 70 40 L 70 60 Q 70 70 60 70 L 40 70 Q 30 70 30 60 Z"
+        stroke="currentColor"
+        strokeWidth="3"
+        fill="none"
+      />
+      <circle cx="50" cy="50" r="8" fill="currentColor" />
+    </svg>
+  ),
+  hp: ({ className = '' }) => (
+    <svg className={className} viewBox="0 0 100 100" fill="none" xmlns="http://www.w3.org/2000/svg">
+      <rect width="100" height="100" rx="16" fill="currentColor" opacity="0.1" />
+      <circle cx="35" cy="50" r="8" fill="currentColor" />
+      <circle cx="65" cy="50" r="8" fill="currentColor" />
+      <line x1="43" y1="50" x2="57" y2="50" stroke="currentColor" strokeWidth="2" />
+    </svg>
+  ),
+  fujitsu: ({ className = '' }) => (
+    <svg className={className} viewBox="0 0 100 100" fill="none" xmlns="http://www.w3.org/2000/svg">
+      <rect width="100" height="100" rx="16" fill="currentColor" opacity="0.1" />
+      <path d="M 30 50 L 50 35 L 70 50 L 50 65 Z" fill="currentColor" opacity="0.8" />
+      <path d="M 35 55 L 50 68 L 65 55 L 50 42 Z" fill="currentColor" opacity="0.5" />
+    </svg>
+  ),
+  lenovo: ({ className = '' }) => (
+    <svg className={className} viewBox="0 0 100 100" fill="none" xmlns="http://www.w3.org/2000/svg">
+      <rect width="100" height="100" rx="16" fill="currentColor" opacity="0.1" />
+      <path d="M 25 35 L 40 60 L 55 35 L 70 60 L 75 50" stroke="currentColor" strokeWidth="3" fill="none" strokeLinecap="round" />
+    </svg>
+  ),
+  ibm: ({ className = '' }) => (
+    <svg className={className} viewBox="0 0 100 100" fill="none" xmlns="http://www.w3.org/2000/svg">
+      <rect width="100" height="100" rx="16" fill="currentColor" opacity="0.1" />
+      <rect x="28" y="35" width="8" height="30" fill="currentColor" />
+      <rect x="46" y="35" width="8" height="30" fill="currentColor" />
+      <rect x="64" y="35" width="8" height="30" fill="currentColor" />
+    </svg>
+  ),
+  brocade: ({ className = '' }) => (
+    <svg className={className} viewBox="0 0 100 100" fill="none" xmlns="http://www.w3.org/2000/svg">
+      <rect width="100" height="100" rx="16" fill="currentColor" opacity="0.1" />
+      <path d="M 30 50 L 50 30 L 70 50 M 30 50 L 50 70 L 70 50" stroke="currentColor" strokeWidth="3" fill="none" strokeLinecap="round" strokeLinejoin="round" />
+    </svg>
+  ),
+  huawei: ({ className = '' }) => (
+    <svg className={className} viewBox="0 0 100 100" fill="none" xmlns="http://www.w3.org/2000/svg">
+      <rect width="100" height="100" rx="16" fill="currentColor" opacity="0.1" />
+      <circle cx="30" cy="45" r="6" fill="currentColor" />
+      <circle cx="50" cy="50" r="6" fill="currentColor" />
+      <circle cx="70" cy="45" r="6" fill="currentColor" />
+      <path d="M 30 45 Q 50 60 70 45" stroke="currentColor" strokeWidth="2" fill="none" />
+    </svg>
+  ),
+  default: ({ className = '' }) => (
+    <svg className={className} viewBox="0 0 100 100" fill="none" xmlns="http://www.w3.org/2000/svg">
+      <rect width="100" height="100" rx="16" fill="currentColor" opacity="0.1" />
+      <circle cx="50" cy="50" r="12" fill="currentColor" opacity="0.5" />
+      <circle cx="50" cy="50" r="6" fill="currentColor" />
+    </svg>
+  ),
+}
+
+const BRAND_COLORS: Record<string, { primary: string; light: string; dark: string }> = {
+  cisco: { primary: 'from-red-500 to-red-600', light: 'bg-red-50', dark: 'text-red-600' },
+  dell: { primary: 'from-cyan-500 to-blue-600', light: 'bg-cyan-50', dark: 'text-cyan-600' },
+  hp: { primary: 'from-blue-500 to-indigo-600', light: 'bg-blue-50', dark: 'text-blue-600' },
+  fujitsu: { primary: 'from-orange-500 to-red-600', light: 'bg-orange-50', dark: 'text-orange-600' },
+  lenovo: { primary: 'from-slate-600 to-slate-700', light: 'bg-slate-50', dark: 'text-slate-700' },
+  ibm: { primary: 'from-indigo-600 to-indigo-700', light: 'bg-indigo-50', dark: 'text-indigo-600' },
+  brocade: { primary: 'from-orange-600 to-orange-700', light: 'bg-orange-50', dark: 'text-orange-700' },
+  huawei: { primary: 'from-red-600 to-red-700', light: 'bg-red-50', dark: 'text-red-600' },
+  default: { primary: 'from-slate-500 to-slate-600', light: 'bg-slate-50', dark: 'text-slate-600' },
+}
+
+function getBrandColors(brandName: string) {
+  const key = brandName.toLowerCase()
+  return BRAND_COLORS[key] || BRAND_COLORS.default
+}
+
+function getBrandIcon(brandName: string) {
+  const key = brandName.toLowerCase()
+  return BrandIcons[key] || BrandIcons.default
+}
 
 function safePayload(payload: unknown): CatalogPayload {
   const p = payload as Partial<CatalogPayload> | null | undefined
@@ -67,6 +196,8 @@ function safePayload(payload: unknown): CatalogPayload {
     series: Array.isArray(p?.series) ? p.series : [],
     models: Array.isArray(p?.models) ? p.models : [],
     skus: Array.isArray(p?.skus) ? p.skus : [],
+    familyFilters: Array.isArray(p?.familyFilters) ? p.familyFilters : [],
+    compatibilities: Array.isArray(p?.compatibilities) ? p.compatibilities : [],
   }
 }
 
@@ -80,6 +211,41 @@ function findDomainIdByCode(domains: Domain[], code: string, fallbackNamePart: s
 
   const fallback = domains.find((d) => normalizeText(d.name).includes(fallbackNamePart))
   return fallback?.id ?? null
+}
+
+function modelMatchesStandardFilter(model: Model, filterKey: string, optionValue: string) {
+  const key = normalizeText(filterKey)
+  const value = normalizeText(optionValue)
+
+  if (key === 'stock') {
+    const inStock = (model.stockQty ?? 0) > 0
+    if (value.includes('stock') && !value.includes('rupture')) return inStock
+    if (value.includes('rupture') || value.includes('out')) return !inStock
+    if (value === 'all' || value === 'tous') return true
+    return false
+  }
+
+  if (key === 'poe') {
+    const poe = Boolean(model.poe)
+    if (value === 'oui' || value === 'yes' || value === 'true') return poe
+    if (value === 'non' || value === 'no' || value === 'false') return !poe
+    if (value === 'all' || value === 'tous') return true
+    return false
+  }
+
+  return (model.specs ?? []).some(
+    (entry) => normalizeText(entry.key) === key && normalizeText(entry.value) === value,
+  )
+}
+
+function getPortAndInterface(specs: Array<{ key: string; value: string }> | undefined) {
+  if (!specs || specs.length === 0) return { port: '', interface: '' }
+  const portSpec = specs.find((s) => normalizeText(s.key).includes('port'))
+  const interfaceSpec = specs.find((s) => normalizeText(s.key).includes('interface'))
+  return {
+    port: portSpec?.value ?? '',
+    interface: interfaceSpec?.value ?? '',
+  }
 }
 
 interface DomainMegaMenuProps {
@@ -96,7 +262,14 @@ interface DomainMegaMenuProps {
   onSelectDomain: (d: string | null) => void
   onSelectBrand: (b: string | null) => void
   onSelectSeries: (s: string | null) => void
-  onSelectModel: (m: string | null) => void
+  onSelectModel: (
+    m: string | null,
+    context?: {
+      domainId: string | null
+      brandId: string | null
+      seriesId: string | null
+    },
+  ) => void
   onClose: () => void
 }
 
@@ -178,14 +351,14 @@ function DomainMegaMenu({
                   key={b.id}
                   onMouseEnter={() => setHoveredBrand(b.id)}
                   onClick={() => {
-                    onSelectDomain(activeDomainId)
-                    onSelectBrand(selectedBrand === b.id ? null : b.id)
-                    onSelectSeries(null)
-                    onSelectModel(null)
+                      onSelectDomain(activeDomainId)
+                      onSelectBrand(selectedBrand === b.id ? null : b.id)
+                      onSelectSeries(null)
+                      onSelectModel(null)
                   }}
                   className={`flex w-full items-center justify-between px-5 py-2.5 text-sm font-semibold transition-colors ${
                     hoveredBrand === b.id
-                      ? 'bg-[#1a3a52] text-white'
+                      ? 'bg-[#2ad1a4] text-white'
                       : 'text-[#1a3a52] hover:bg-[#eef3f8]'
                   }`}
                 >
@@ -208,14 +381,14 @@ function DomainMegaMenu({
                   key={s.id}
                   onMouseEnter={() => setHoveredSeries(s.id)}
                   onClick={() => {
-                    onSelectDomain(activeDomainId)
-                    onSelectBrand(effectiveHoveredBrand)
-                    onSelectSeries(selectedSeries === s.id ? null : s.id)
-                    onSelectModel(null)
+                      onSelectDomain(activeDomainId)
+                      onSelectBrand(effectiveHoveredBrand)
+                      onSelectSeries(selectedSeries === s.id ? null : s.id)
+                      onSelectModel(null)
                   }}
                   className={`flex w-full items-center gap-2 px-5 py-2.5 text-sm transition-colors ${
                     selectedSeries === s.id
-                      ? 'bg-[#e8faf4] font-semibold text-[#0f7a54]'
+                      ? 'bg-[#2ad1a4] font-semibold text-white'
                       : 'text-[#334e68] hover:bg-[#f0f7ff] hover:text-[#1a3a52]'
                   }`}
                 >
@@ -237,15 +410,16 @@ function DomainMegaMenu({
                 <button
                   key={m.id}
                   onClick={() => {
-                    onSelectDomain(activeDomainId)
-                    onSelectBrand(effectiveHoveredBrand)
-                    onSelectSeries(effectiveHoveredSeries)
-                    onSelectModel(selectedModel === m.id ? null : m.id)
+                      onSelectModel(selectedModel === m.id ? null : m.id, {
+                        domainId: activeDomainId,
+                        brandId: effectiveHoveredBrand,
+                        seriesId: effectiveHoveredSeries,
+                      })
                     onClose()
                   }}
                   className={`flex w-full items-center gap-2 px-5 py-2.5 text-sm transition-colors ${
                     selectedModel === m.id
-                      ? 'bg-[#e8faf4] font-semibold text-[#0f7a54]'
+                      ? 'bg-[#2ad1a4] font-semibold text-white'
                       : 'text-[#334e68] hover:bg-[#f0f7ff]'
                   }`}
                 >
@@ -383,6 +557,8 @@ export default function Home() {
     series: [],
     models: [],
     skus: [],
+    familyFilters: [],
+    compatibilities: [],
   })
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
@@ -393,13 +569,17 @@ export default function Home() {
   const [selectedModel, setSelectedModel] = useState<string | null>(null)
   const [stockFilter, setStockFilter] = useState<'all' | 'in' | 'out'>('all')
   const [poeFilter, setPoeFilter] = useState<'all' | 'yes' | 'no'>('all')
-  const [selectedSpec, setSelectedSpec] = useState('')
+  const [selectedSpecFilters, setSelectedSpecFilters] = useState<Record<string, string[]>>({})
   const [currentPage, setCurrentPage] = useState(1)
   const [sortBy, setSortBy] = useState<'position' | 'name' | 'price' | 'stock'>('stock')
+  const [partsBrandId, setPartsBrandId] = useState<string | null>(null)
+  const [partsModelId, setPartsModelId] = useState<string | null>(null)
+  const [partsStockFilter, setPartsStockFilter] = useState<'all' | 'in' | 'out'>('all')
 
   const [menuOpen, setMenuOpen] = useState(false)
   const [activeMenu, setActiveMenu] = useState<MenuKind | null>(null)
   const menuRef = useRef<HTMLDivElement>(null)
+  const sectionParamAppliedRef = useRef(false)
 
   const serverDomainId = useMemo(() => findDomainIdByCode(catalog.domains, 'SERVER', 'serveur'), [catalog.domains])
   const storageDomainId = useMemo(() => findDomainIdByCode(catalog.domains, 'STORAGE', 'storage'), [catalog.domains])
@@ -411,6 +591,87 @@ export default function Home() {
     if (activeMenu === 'network') return catalog.domains.find((d) => d.id === networkDomainId) ?? null
     return null
   }, [activeMenu, catalog.domains, networkDomainId, serverDomainId, storageDomainId])
+
+  const partsTargetModels = useMemo(
+    () => catalog.models.filter((model) => model.condition === 'CONFIGURABLE' && model.domainId !== 'domain-products'),
+    [catalog.models],
+  )
+
+  const partsBrandOptions = useMemo(() => {
+    const counts = new Map<string, number>()
+    partsTargetModels.forEach((model) => {
+      counts.set(model.brandId, (counts.get(model.brandId) ?? 0) + 1)
+    })
+
+    return Array.from(counts.entries())
+      .map(([brandId, count]) => {
+        const brand = catalog.brands.find((entry) => entry.id === brandId)
+        if (!brand) return null
+        return { brandId, name: brand.name, count }
+      })
+      .filter((entry): entry is { brandId: string; name: string; count: number } => Boolean(entry))
+      .sort((a, b) => a.name.localeCompare(b.name, 'fr', { sensitivity: 'base' }))
+  }, [catalog.brands, partsTargetModels])
+
+  const partsModelOptions = useMemo(
+    () => partsTargetModels.filter((model) => (partsBrandId ? model.brandId === partsBrandId : false)).sort((a, b) => a.name.localeCompare(b.name)),
+    [partsBrandId, partsTargetModels],
+  )
+
+  const partIdsByTargetModel = useMemo(() => {
+    const map = new Map<string, Set<string>>()
+    catalog.compatibilities.forEach((link) => {
+      const existing = map.get(link.targetProductId) ?? new Set<string>()
+      existing.add(link.partProductId)
+      map.set(link.targetProductId, existing)
+    })
+    return map
+  }, [catalog.compatibilities])
+
+  const compatiblePartModels = useMemo(() => {
+    if (!partsModelId) return []
+
+    const sparePartIds = partIdsByTargetModel.get(partsModelId) ?? new Set<string>()
+    const selectedTargetModel = catalog.models.find((model) => model.id === partsModelId) ?? null
+    const hasExplicitCompatibilities = sparePartIds.size > 0
+
+    return catalog.models
+      .filter((model) => model.condition === 'STANDARD' && model.domainId === 'domain-products')
+      .filter((model) => {
+        const family = String(model.familyName ?? '')
+          .toLowerCase()
+          .normalize('NFD')
+          .replace(/[\u0300-\u036f]/g, '')
+        return family.includes('piece') || family.includes('detache')
+      })
+      .filter((model) => {
+        if (hasExplicitCompatibilities) return sparePartIds.has(model.id)
+        if (!selectedTargetModel) return false
+        return model.brandId === selectedTargetModel.brandId
+      })
+      .filter((model) => {
+        if (partsStockFilter === 'in') return (model.stockQty ?? 0) > 0
+        if (partsStockFilter === 'out') return (model.stockQty ?? 0) <= 0
+        return true
+      })
+      .filter((model) => {
+        const q = query.trim().toLowerCase()
+        if (!q) return true
+        const haystack = `${model.name} ${model.brandName ?? ''} ${model.familyName ?? ''} ${model.categoryName ?? ''} ${model.reference}`.toLowerCase()
+        return haystack.includes(q)
+      })
+      .sort((a, b) => a.name.localeCompare(b.name))
+  }, [catalog.models, partIdsByTargetModel, partsModelId, partsStockFilter, query])
+
+  const selectedPartsBrand = useMemo(
+    () => partsBrandOptions.find((entry) => entry.brandId === partsBrandId) ?? null,
+    [partsBrandId, partsBrandOptions],
+  )
+
+  const selectedPartsModel = useMemo(
+    () => partsModelOptions.find((entry) => entry.id === partsModelId) ?? null,
+    [partsModelId, partsModelOptions],
+  )
 
   const getServerFamilyLabel = (s: Series) => {
     const raw = `${s.name} ${s.description ?? ''}`.toLowerCase()
@@ -451,13 +712,23 @@ export default function Home() {
     setMenuOpen(true)
   }
 
-  function openModelConfigurator(modelId: string) {
+  function openModelConfigurator(
+    modelId: string,
+    context?: {
+      domainId: string | null
+      brandId: string | null
+      seriesId: string | null
+    },
+  ) {
     const model = catalog.models.find((entry) => entry.id === modelId)
     if (!model) return
 
     setMenuOpen(false)
     setActiveMenu(null)
     if (model.condition !== 'CONFIGURABLE') {
+      if (context?.domainId !== undefined) setSelectedDomain(context.domainId)
+      if (context?.brandId !== undefined) setSelectedBrand(context.brandId)
+      if (context?.seriesId !== undefined) setSelectedSeries(context.seriesId)
       setSelectedModel(modelId)
       return
     }
@@ -488,17 +759,62 @@ export default function Home() {
   }, [menuOpen])
 
   useEffect(() => {
+    if (sectionParamAppliedRef.current) return
+
+    if (typeof window === 'undefined') return
+
+    const params = new URLSearchParams(window.location.search)
+
+    const section = params.get('section')
+    const brandIdParam = params.get('brandId')
+    const seriesIdParam = params.get('seriesId')
+    const modelIdParam = params.get('modelId')
+    if (!section) {
+      sectionParamAppliedRef.current = true
+      return
+    }
+
+    if (section === 'products') {
+      setSelectedDomain('domain-products')
+      setSelectedBrand(brandIdParam)
+      setSelectedSeries(seriesIdParam)
+      setSelectedModel(modelIdParam)
+      sectionParamAppliedRef.current = true
+      return
+    }
+
+    if (section === 'server' && serverDomainId) {
+      setSelectedDomain(serverDomainId)
+      setSelectedBrand(brandIdParam)
+      setSelectedSeries(seriesIdParam)
+      setSelectedModel(modelIdParam)
+      sectionParamAppliedRef.current = true
+      return
+    }
+
+    if (section === 'storage' && storageDomainId) {
+      setSelectedDomain(storageDomainId)
+      setSelectedBrand(brandIdParam)
+      setSelectedSeries(seriesIdParam)
+      setSelectedModel(modelIdParam)
+      sectionParamAppliedRef.current = true
+      return
+    }
+
+    if (section === 'network' && networkDomainId) {
+      setSelectedDomain(networkDomainId)
+      setSelectedBrand(brandIdParam)
+      setSelectedSeries(seriesIdParam)
+      setSelectedModel(modelIdParam)
+      sectionParamAppliedRef.current = true
+    }
+  }, [networkDomainId, serverDomainId, storageDomainId])
+
+  useEffect(() => {
     const timer = window.setTimeout(async () => {
       setLoading(true)
       try {
-        const params = new URLSearchParams()
-        if (query.trim()) params.set('search', query.trim())
-        if (selectedDomain) params.set('domainId', selectedDomain)
-        if (selectedBrand) params.set('brandId', selectedBrand)
-        if (selectedSeries) params.set('seriesId', selectedSeries)
-        if (selectedModel) params.set('modelId', selectedModel)
-
-        const res = await fetch(`/api/catalog?${params.toString()}`)
+        const res = await fetch('/api/catalog')
         if (!res.ok) throw new Error('Erreur de chargement du catalogue')
         const data = await res.json()
         setCatalog(safePayload(data))
@@ -511,7 +827,7 @@ export default function Home() {
     }, 200)
 
     return () => window.clearTimeout(timer)
-  }, [query, selectedDomain, selectedBrand, selectedSeries, selectedModel])
+  }, [])
 
   const selectedDomainRecord = useMemo(
     () => catalog.domains.find((domain) => domain.id === selectedDomain) ?? null,
@@ -528,6 +844,131 @@ export default function Home() {
 
   const isProductsDomain = selectedDomain === 'domain-products'
   const isConfiguratorDomain = selectedDomain === serverDomainId || selectedDomain === storageDomainId || selectedDomain === networkDomainId
+
+  const selectedFamilyFilters = useMemo(() => {
+    const familyId = selectedSeriesRecord?.familyId
+    if (!familyId) return []
+
+    const assigned = catalog.familyFilters.find((entry) => entry.familyId === familyId)
+    if (!assigned) return []
+
+    return assigned.filters
+  }, [catalog.familyFilters, selectedSeriesRecord?.familyId])
+
+  const selectedFamilyFilterKeys = useMemo(
+    () => selectedFamilyFilters.map((entry) => entry.name.trim()).filter(Boolean),
+    [selectedFamilyFilters],
+  )
+
+  const configuratorBrandOptions = useMemo(() => {
+    if (!isConfiguratorDomain || !selectedDomain) return []
+
+    const counts = new Map<string, number>()
+
+    catalog.models.forEach((model) => {
+      if (model.domainId !== selectedDomain) return
+      if (model.condition !== 'CONFIGURABLE') return
+      if (selectedSeries && model.seriesId !== selectedSeries) return
+
+      counts.set(model.brandId, (counts.get(model.brandId) ?? 0) + 1)
+    })
+
+    return Array.from(counts.entries())
+      .map(([brandId, count]) => {
+        const brand = catalog.brands.find((entry) => entry.id === brandId)
+        if (!brand) return null
+
+        return {
+          brandId,
+          name: brand.name,
+          count,
+        }
+      })
+      .filter((entry): entry is { brandId: string; name: string; count: number } => Boolean(entry))
+      .sort((a, b) => a.name.localeCompare(b.name, 'fr', { sensitivity: 'base' }))
+  }, [catalog.brands, catalog.models, isConfiguratorDomain, selectedDomain, selectedSeries])
+
+  const configuratorBrandTotal = useMemo(
+    () => configuratorBrandOptions.reduce((sum, item) => sum + item.count, 0),
+    [configuratorBrandOptions],
+  )
+
+  const productBrandOptions = useMemo(() => {
+    const counts = new Map<string, number>()
+
+    catalog.models.forEach((model) => {
+      if (model.domainId !== 'domain-products') return
+      if (model.condition !== 'STANDARD') return
+
+      counts.set(model.brandId, (counts.get(model.brandId) ?? 0) + 1)
+    })
+
+    return Array.from(counts.entries())
+      .map(([brandId, count]) => {
+        const brand = catalog.brands.find((entry) => entry.id === brandId)
+        if (!brand) return null
+
+        return {
+          brandId,
+          name: brand.name,
+          count,
+        }
+      })
+      .filter((entry): entry is { brandId: string; name: string; count: number } => Boolean(entry))
+      .sort((a, b) => a.name.localeCompare(b.name, 'fr', { sensitivity: 'base' }))
+  }, [catalog.brands, catalog.models])
+
+  const productBrandTotal = useMemo(
+    () => productBrandOptions.reduce((sum, item) => sum + item.count, 0),
+    [productBrandOptions],
+  )
+
+  const productFamilyOptions = useMemo(() => {
+    if (!selectedBrand) return []
+
+    const counts = new Map<string, number>()
+
+    catalog.models.forEach((model) => {
+      if (model.domainId !== 'domain-products') return
+      if (model.condition !== 'STANDARD') return
+      if (model.brandId !== selectedBrand) return
+
+      counts.set(model.seriesId, (counts.get(model.seriesId) ?? 0) + 1)
+    })
+
+    return Array.from(counts.entries())
+      .map(([seriesId, count]) => {
+        const family = catalog.series.find((entry) => entry.id === seriesId)
+        if (!family) return null
+
+        return {
+          seriesId,
+          name: family.name,
+          count,
+        }
+      })
+      .filter((entry): entry is { seriesId: string; name: string; count: number } => Boolean(entry))
+      .sort((a, b) => a.name.localeCompare(b.name, 'fr', { sensitivity: 'base' }))
+  }, [catalog.models, catalog.series, selectedBrand])
+
+  const productFamilyTotal = useMemo(
+    () => productFamilyOptions.reduce((sum, item) => sum + item.count, 0),
+    [productFamilyOptions],
+  )
+
+  useEffect(() => {
+    if (!isProductsDomain) return
+    if (!selectedBrand) {
+      if (selectedSeries) {
+        setSelectedSeries(null)
+      }
+      return
+    }
+
+    if (selectedSeries && !productFamilyOptions.some((item) => item.seriesId === selectedSeries)) {
+      setSelectedSeries(null)
+    }
+  }, [isProductsDomain, productFamilyOptions, selectedBrand, selectedSeries])
 
   const baseModels = useMemo(() => {
     if (!selectedDomain) return []
@@ -547,22 +988,83 @@ export default function Home() {
     return list
   }, [catalog.models, isProductsDomain, selectedBrand, selectedDomain, selectedModel, selectedSeries])
 
-  const standardSpecChoices = useMemo(() => {
-    const set = new Set<string>()
-    baseModels
-      .filter((model) => model.condition === 'STANDARD')
-      .forEach((model) => {
-        ;(model.specs ?? []).forEach((entry) => {
-          const key = `${entry.key}: ${entry.value}`
-          if (entry.key && entry.value) set.add(key)
-        })
+  const standardSpecGroups = useMemo<StandardSpecFilterGroup[]>(() => {
+    if (!isProductsDomain || !selectedSeries) return []
+
+    const groups = new Map<string, Map<string, number>>()
+
+    selectedFamilyFilters.forEach((filterDef) => {
+      const key = filterDef.name.trim()
+      if (!key) return
+
+      const valuesWithCount = new Map<string, number>()
+      const configuredValues = filterDef.values.map((value) => value.trim()).filter(Boolean)
+
+      const sourceValues = configuredValues.length > 0
+        ? configuredValues
+        : Array.from(
+          new Set(
+            baseModels.flatMap((model) =>
+              (model.specs ?? [])
+                .filter((entry) => normalizeText(entry.key) === normalizeText(key))
+                .map((entry) => entry.value.trim())
+                .filter(Boolean),
+            ),
+          ),
+        )
+
+      sourceValues.forEach((optionValue) => {
+        const count = baseModels.filter(
+          (model) => model.condition === 'STANDARD' && modelMatchesStandardFilter(model, key, optionValue),
+        ).length
+        valuesWithCount.set(optionValue, count)
       })
-    return Array.from(set).sort((a, b) => a.localeCompare(b))
-  }, [baseModels])
+
+      groups.set(key, valuesWithCount)
+    })
+
+    const builtGroups = Array.from(groups.entries())
+      .map(([key, values]) => ({
+        key,
+        options: Array.from(values.entries())
+          .map(([value, count]) => ({ value, count }))
+          .sort((a, b) => a.value.localeCompare(b.value, 'fr', { numeric: true, sensitivity: 'base' })),
+      }))
+      .sort((a, b) => a.key.localeCompare(b.key, 'fr', { numeric: true, sensitivity: 'base' }))
+
+    const allowed = new Set(selectedFamilyFilterKeys.map((key) => key.toLowerCase()))
+    return builtGroups.filter((group) => allowed.has(group.key.toLowerCase()))
+  }, [baseModels, isProductsDomain, selectedFamilyFilterKeys, selectedFamilyFilters, selectedSeries])
 
   const filteredModels = useMemo(() => {
+    const normalizedQuery = query.trim().toLowerCase()
+
     return baseModels
       .filter((model) => {
+        if (normalizedQuery) {
+          const brandName = catalog.brands.find((brand) => brand.id === model.brandId)?.name ?? ''
+          const seriesName = catalog.series.find((item) => item.id === model.seriesId)?.name ?? ''
+          const domainName = catalog.domains.find((domain) => domain.id === model.domainId)?.name ?? ''
+          const specsText = (model.specs ?? [])
+            .map((entry) => `${entry.key} ${entry.value}`)
+            .join(' ')
+
+          const haystack = [
+            model.name,
+            model.reference,
+            brandName,
+            seriesName,
+            domainName,
+            model.shortDescription ?? '',
+            model.longDescription ?? '',
+            specsText,
+          ]
+            .join(' ')
+            .toLowerCase()
+
+          if (!haystack.includes(normalizedQuery)) return false
+        }
+
         if (isConfiguratorDomain) {
           if (stockFilter === 'in' && (model.stockQty ?? 0) <= 0) return false
           if (stockFilter === 'out' && (model.stockQty ?? 0) > 0) return false
@@ -570,17 +1072,20 @@ export default function Home() {
           if (poeFilter === 'no' && model.poe) return false
         }
 
-        if (isProductsDomain && selectedSpec) {
-          if (model.condition !== 'STANDARD') return false
-          const [specKey, specValue] = selectedSpec.split(':').map((part) => part.trim())
-          const match = (model.specs ?? []).some((entry) => entry.key === specKey && entry.value === specValue)
-          if (!match) return false
+        if (isProductsDomain && model.condition === 'STANDARD') {
+          const activeSpecFilters = Object.entries(selectedSpecFilters).filter(([, values]) => values.length > 0)
+
+          for (const [specKey, selectedValues] of activeSpecFilters) {
+            const match = selectedValues.some((value) => modelMatchesStandardFilter(model, specKey, value))
+
+            if (!match) return false
+          }
         }
         return true
       })
       .slice()
       .sort((a, b) => a.name.localeCompare(b.name))
-  }, [baseModels, isConfiguratorDomain, isProductsDomain, poeFilter, selectedSpec, stockFilter])
+  }, [baseModels, catalog.brands, catalog.domains, catalog.series, isConfiguratorDomain, isProductsDomain, poeFilter, query, selectedSpecFilters, stockFilter])
 
   const sortedModels = useMemo(() => {
     const withIndex = filteredModels.map((model, index) => ({ model, index }))
@@ -612,13 +1117,24 @@ export default function Home() {
 
   useEffect(() => {
     setCurrentPage(1)
-  }, [query, selectedDomain, selectedBrand, selectedSeries, selectedModel, stockFilter, poeFilter, selectedSpec])
+  }, [query, selectedDomain, selectedBrand, selectedSeries, selectedModel, stockFilter, poeFilter, selectedSpecFilters])
 
   useEffect(() => {
     if (currentPage > totalPages) {
       setCurrentPage(totalPages)
     }
   }, [currentPage, totalPages])
+
+  useEffect(() => {
+    if (!partsBrandId) {
+      if (partsModelId) setPartsModelId(null)
+      return
+    }
+
+    if (partsModelId && !partsModelOptions.some((model) => model.id === partsModelId)) {
+      setPartsModelId(null)
+    }
+  }, [partsBrandId, partsModelId, partsModelOptions])
 
   function clearFilters() {
     setSelectedDomain(null)
@@ -628,9 +1144,32 @@ export default function Home() {
     setQuery('')
     setStockFilter('all')
     setPoeFilter('all')
-    setSelectedSpec('')
+    setSelectedSpecFilters({})
     setSortBy('stock')
     setCurrentPage(1)
+    setPartsBrandId(null)
+    setPartsModelId(null)
+    setPartsStockFilter('all')
+  }
+
+  function toggleStandardSpecFilter(specKey: string, specValue: string, checked: boolean) {
+    setSelectedSpecFilters((previous) => {
+      const current = previous[specKey] ?? []
+      const nextValues = checked
+        ? Array.from(new Set([...current, specValue]))
+        : current.filter((value) => value !== specValue)
+
+      if (nextValues.length === 0) {
+        const next = { ...previous }
+        delete next[specKey]
+        return next
+      }
+
+      return {
+        ...previous,
+        [specKey]: nextValues,
+      }
+    })
   }
 
   const activeTitle = selectedModel
@@ -645,6 +1184,7 @@ export default function Home() {
 
   const resultsStart = sortedModels.length === 0 ? 0 : (safePage - 1) * pageSize + 1
   const resultsEnd = Math.min(safePage * pageSize, sortedModels.length)
+  const hasActiveSelection = Boolean(selectedDomain || selectedBrand || selectedSeries || selectedModel)
 
   return (
     <div className="min-h-screen bg-[#f5f7fa] font-sans text-[#1a3a52]">
@@ -662,7 +1202,16 @@ export default function Home() {
         <div className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8">
           <div className="flex items-center gap-6 py-4">
             <div className="shrink-0 text-xl font-black tracking-tight text-white">
-              Redsys<span className="text-[#2ad1a4]">Tech</span>
+              <Link href="/" aria-label="Accueil" className="block">
+                <Image
+                  src="/redsys-logo.png"
+                  alt="Redsys"
+                  width={220}
+                  height={64}
+                  className="h-12 w-auto"
+                  priority
+                />
+              </Link>
             </div>
 
             <div className="relative hidden flex-1 md:block">
@@ -759,6 +1308,7 @@ export default function Home() {
                 Reseau-configurateur
                 <ChevronDown className={`h-3.5 w-3.5 transition-transform ${menuOpen && activeMenu === 'network' ? 'rotate-180' : ''}`} />
               </button>
+
             </div>
 
             {menuOpen && (
@@ -775,6 +1325,7 @@ export default function Home() {
                       setSelectedModel(null)
                       setStockFilter('all')
                       setPoeFilter('all')
+                      setSelectedSpecFilters({})
                       setMenuOpen(false)
                       setActiveMenu(null)
                     }}
@@ -785,6 +1336,7 @@ export default function Home() {
                       setSelectedModel(null)
                       setStockFilter('all')
                       setPoeFilter('all')
+                      setSelectedSpecFilters({})
                       setMenuOpen(false)
                       setActiveMenu(null)
                     }}
@@ -806,15 +1358,15 @@ export default function Home() {
                     onSelectDomain={selectDomain}
                     onSelectBrand={(brandId) => {
                       setSelectedBrand(brandId)
-                      setSelectedSpec('')
+                      setSelectedSpecFilters({})
                     }}
                     onSelectSeries={(seriesId) => {
                       setSelectedSeries(seriesId)
-                      setSelectedSpec('')
+                      setSelectedSpecFilters({})
                     }}
-                    onSelectModel={(modelId) => {
+                    onSelectModel={(modelId, context) => {
                       if (modelId) {
-                        openModelConfigurator(modelId)
+                        openModelConfigurator(modelId, context)
                         return
                       }
                       setSelectedModel(null)
@@ -843,15 +1395,15 @@ export default function Home() {
         </div>
       </header>
 
-      <section className="border-b border-[#d0d9e3] bg-white">
-        <div className="mx-auto max-w-7xl px-4 py-8 sm:px-6 lg:px-8">
-          {error && (
-            <div className="mb-4 rounded-lg border border-red-200 bg-red-50 px-4 py-2 text-sm font-medium text-red-700">
-              {error}
-            </div>
-          )}
+      {hasActiveSelection && (
+        <section className="border-b border-[#d0d9e3] bg-white">
+          <div className="mx-auto max-w-7xl px-4 py-8 sm:px-6 lg:px-8">
+            {error && (
+              <div className="mb-4 rounded-lg border border-red-200 bg-red-50 px-4 py-2 text-sm font-medium text-red-700">
+                {error}
+              </div>
+            )}
 
-          {(selectedDomain || selectedBrand || selectedSeries || selectedModel) && (
             <nav className="mb-4 flex items-center gap-2 text-sm text-[#5a7a9a]">
               <button onClick={clearFilters} className="hover:text-[#1a3a52]">Accueil</button>
               {selectedDomainRecord && (
@@ -887,51 +1439,367 @@ export default function Home() {
                 </>
               )}
             </nav>
-          )}
 
-          <div className="flex items-end justify-between gap-4">
-            <div>
-              <h1 className="text-3xl font-black sm:text-4xl">{activeTitle}</h1>
-              <p className="mt-1 text-sm text-[#5a7a9a]">
-                {loading ? 'Chargement...' : `Produits ${resultsStart}-${resultsEnd} sur ${sortedModels.length}`}
-              </p>
+            <div className="flex items-end justify-between gap-4">
+              <div>
+                <h1 className="text-3xl font-black sm:text-4xl">{activeTitle}</h1>
+                <p className="mt-1 text-sm text-[#5a7a9a]">
+                  {loading ? 'Chargement...' : `Produits ${resultsStart}-${resultsEnd} sur ${sortedModels.length}`}
+                </p>
 
-              {isProductsDomain && (
-                <div className="mt-4 grid gap-3 lg:max-w-lg">
-                  <select
-                    className="h-10 rounded border border-[#d0d9e3] bg-white px-3 text-sm text-[#1a3a52]"
-                    value={selectedSpec}
-                    onChange={(event) => setSelectedSpec(event.target.value)}
-                  >
-                    <option value="">Specs standard: Toutes</option>
-                    {standardSpecChoices.map((specValue) => (
-                      <option key={specValue} value={specValue}>{specValue}</option>
-                    ))}
-                  </select>
-                </div>
-              )}
+                {isProductsDomain && selectedSeries && standardSpecGroups.length === 0 && (
+                  <p className="mt-3 text-sm text-[#5a7a9a]">Aucun filtre configure pour cette famille.</p>
+                )}
+              </div>
             </div>
           </div>
-        </div>
-      </section>
+        </section>
+      )}
 
       <main id="products" className="mx-auto max-w-7xl px-4 py-10 sm:px-6 lg:px-8">
         {!selectedDomain ? (
-          <Card className="border-[#d0d9e3] bg-white shadow-sm">
-            <CardContent className="p-8 text-center">
-              <p className="text-xs uppercase tracking-[0.24em] text-[#7a8fa3]">Catalogue</p>
-              <h2 className="mt-2 text-2xl font-black text-[#1a3a52] sm:text-3xl">Selectionnez une section dans le header</h2>
-              <p className="mt-3 text-sm text-[#5a7a9a]">
-                Utilisez Produits pour les produits standards (avec filtre par specs), ou les configurateurs Serveur / Storage / Reseau avec filtres PoE et stock.
-              </p>
-            </CardContent>
-          </Card>
+          loading ? (
+            <div className="flex flex-col items-center justify-center rounded-2xl border border-[#d0d9e3] bg-white p-16 text-[#5a7a9a]">
+              <div className="h-10 w-10 animate-spin rounded-full border-4 border-[#d0d9e3] border-t-[#2ad1a4]" />
+              <p className="mt-4 text-sm">Chargement du Parts Finder...</p>
+            </div>
+          ) : (
+          <div className="space-y-10">
+            {!partsBrandId && (
+              <>
+                <div className="space-y-3 text-center">
+                  <h1 className="text-4xl font-black tracking-tight text-slate-950 sm:text-5xl">Parts Finder</h1>
+                  <p className="text-base text-slate-600 sm:text-lg">
+                    Trouver des pièces détachées adaptées à votre serveur spécifique
+                  </p>
+                </div>
+
+                <div className="mx-auto max-w-4xl">
+                  <div className="flex items-center justify-between gap-2 sm:gap-4">
+                    <div className="flex flex-col items-center gap-2">
+                      <div className="flex h-12 w-12 items-center justify-center rounded-full bg-gradient-to-br from-teal-500 to-teal-600 font-bold text-white shadow-lg">
+                        1
+                      </div>
+                      <span className="hidden text-center text-xs font-semibold text-teal-600 sm:inline-block sm:text-sm">
+                        Marque
+                      </span>
+                    </div>
+
+                    <div className="hidden h-1 flex-1 rounded-full bg-gradient-to-r from-teal-200 to-slate-300 sm:block" />
+
+                    <div className="flex flex-col items-center gap-2">
+                      <div className="flex h-12 w-12 items-center justify-center rounded-full bg-slate-300 font-bold text-slate-600">
+                        2
+                      </div>
+                      <span className="hidden text-center text-xs font-semibold text-slate-500 sm:inline-block sm:text-sm">
+                        Modèle
+                      </span>
+                    </div>
+
+                    <div className="hidden h-1 flex-1 rounded-full bg-gradient-to-r from-slate-300 to-slate-200 sm:block" />
+
+                    <div className="flex flex-col items-center gap-2">
+                      <div className="flex h-12 w-12 items-center justify-center rounded-full bg-slate-300 font-bold text-slate-600">
+                        3
+                      </div>
+                      <span className="hidden text-center text-xs font-semibold text-slate-500 sm:inline-block sm:text-sm">
+                        Résultats
+                      </span>
+                    </div>
+                  </div>
+                </div>
+
+                <div className="grid gap-4 sm:grid-cols-2 sm:gap-6 lg:grid-cols-4">
+                  {partsBrandOptions.map((item) => {
+                    const colors = getBrandColors(item.name)
+                    const IconComponent = getBrandIcon(item.name)
+
+                    return (
+                      <button
+                        key={item.brandId}
+                        onClick={() => setPartsBrandId(item.brandId)}
+                        className="group relative overflow-hidden rounded-2xl border-2 border-slate-200 bg-white shadow-sm transition-all duration-300 hover:-translate-y-1 hover:border-slate-300 hover:shadow-xl"
+                      >
+                        <div className={`absolute inset-0 bg-gradient-to-br ${colors.primary} opacity-0 transition-opacity duration-300 group-hover:opacity-5`} />
+
+                        <div className="relative flex h-full flex-col space-y-4 p-6">
+                          <div className={`${colors.light} flex items-center justify-center rounded-xl p-6 transition-transform duration-300 group-hover:scale-110`}>
+                            <IconComponent className={`h-16 w-16 ${colors.dark}`} />
+                          </div>
+
+                          <div className="flex-1 space-y-1">
+                            <h3 className="text-lg font-bold text-slate-900 transition-colors group-hover:text-slate-950">
+                              {item.name}
+                            </h3>
+                            <p className="text-sm text-slate-500">
+                              {item.count} modèle{item.count > 1 ? 's' : ''}
+                            </p>
+                          </div>
+
+                          <span
+                            className="flex items-center justify-center gap-2 rounded-xl bg-[#2ad1a4] px-4 py-3 font-semibold text-white transition-all duration-300 hover:bg-[#20b890] hover:shadow-lg"
+                          >
+                            Sélectionner
+                            <ChevronRight className="h-4 w-4 transition-transform group-hover:translate-x-1" />
+                          </span>
+                        </div>
+                      </button>
+                    )
+                  })}
+                </div>
+              </>
+            )}
+
+            {partsBrandId && !partsModelId && (
+              <>
+                <div className="space-y-3 text-center">
+                  <h1 className="text-4xl font-black tracking-tight text-slate-950 sm:text-5xl">Parts Finder</h1>
+                  <p className="text-base text-slate-600 sm:text-lg">
+                    Trouver des pièces détachées adaptées à votre serveur spécifique
+                  </p>
+                </div>
+
+                <div className="mx-auto max-w-4xl">
+                  <div className="flex items-center justify-between gap-2 sm:gap-4">
+                    <div className="flex flex-col items-center gap-2">
+                      <div className="flex h-12 w-12 items-center justify-center rounded-full bg-teal-500 font-bold text-white">
+                        ✓
+                      </div>
+                      <span className="hidden text-center text-xs font-semibold text-teal-600 sm:inline-block sm:text-sm">
+                        Marque
+                      </span>
+                    </div>
+
+                    <div className="hidden h-1 flex-1 rounded-full bg-gradient-to-r from-teal-200 to-teal-300 sm:block" />
+
+                    <div className="flex flex-col items-center gap-2">
+                      <div className={`flex h-12 w-12 items-center justify-center rounded-full bg-gradient-to-br ${getBrandColors(selectedPartsBrand?.name || '').primary} font-bold text-white shadow-lg`}>
+                        2
+                      </div>
+                      <span className="hidden text-center text-xs font-semibold text-teal-600 sm:inline-block sm:text-sm">
+                        Modèle
+                      </span>
+                    </div>
+
+                    <div className="hidden h-1 flex-1 rounded-full bg-gradient-to-r from-slate-300 to-slate-200 sm:block" />
+
+                    <div className="flex flex-col items-center gap-2">
+                      <div className="flex h-12 w-12 items-center justify-center rounded-full bg-slate-300 font-bold text-slate-600">
+                        3
+                      </div>
+                      <span className="hidden text-center text-xs font-semibold text-slate-500 sm:inline-block sm:text-sm">
+                        Résultats
+                      </span>
+                    </div>
+                  </div>
+                </div>
+
+                <div className="flex items-center gap-4">
+                  <button
+                    onClick={() => {
+                      setPartsBrandId(null)
+                      setPartsModelId(null)
+                    }}
+                    className="inline-flex items-center gap-2 rounded-xl px-4 py-2 font-semibold text-slate-600 transition-colors hover:bg-slate-100"
+                  >
+                    <ArrowLeft className="h-4 w-4" />
+                    <span className="hidden sm:inline">Retour</span>
+                  </button>
+                  <h2 className="text-xl font-bold text-slate-900 sm:text-2xl">
+                    Modèles {selectedPartsBrand?.name}
+                  </h2>
+                </div>
+
+                <div className="grid gap-4 sm:grid-cols-2 sm:gap-6 lg:grid-cols-4">
+                  {partsModelOptions.map((model) => {
+                    const brandColors = getBrandColors(selectedPartsBrand?.name || '')
+
+                    return (
+                      <button
+                        key={model.id}
+                        onClick={() => setPartsModelId(model.id)}
+                        className="group relative overflow-hidden rounded-2xl border-2 border-slate-200 bg-white shadow-sm transition-all duration-300 hover:-translate-y-1 hover:border-slate-300 hover:shadow-xl"
+                      >
+                        <div className={`absolute inset-0 bg-gradient-to-br ${brandColors.primary} opacity-0 transition-opacity duration-300 group-hover:opacity-5`} />
+
+                        <div className="relative flex h-full flex-col space-y-4 p-6">
+                          <div className={`${brandColors.light} flex aspect-video items-center justify-center rounded-xl p-8 transition-transform duration-300 group-hover:scale-110`}>
+                            <div className="text-4xl font-black text-slate-600 opacity-30">
+                              {model.name.charAt(0)}
+                            </div>
+                          </div>
+
+                          <div className="flex-1">
+                            <h3 className="line-clamp-2 text-base font-bold text-slate-900 transition-colors group-hover:text-slate-950">
+                              {model.name}
+                            </h3>
+                          </div>
+
+                          <span
+                            className="flex items-center justify-center gap-2 rounded-xl bg-[#2ad1a4] px-4 py-3 font-semibold text-white transition-all duration-300 hover:bg-[#20b890] hover:shadow-lg"
+                          >
+                            Sélectionner
+                            <ChevronRight className="h-4 w-4 transition-transform group-hover:translate-x-1" />
+                          </span>
+                        </div>
+                      </button>
+                    )
+                  })}
+                </div>
+              </>
+            )}
+
+            {partsBrandId && partsModelId && (
+              <>
+                <div className="space-y-3 text-center">
+                  <h1 className="text-4xl font-black tracking-tight text-slate-950 sm:text-5xl">Parts Finder</h1>
+                  <p className="text-base text-slate-600 sm:text-lg">
+                    Trouver des pièces détachées adaptées à votre serveur spécifique
+                  </p>
+                </div>
+
+                <div className="mx-auto max-w-4xl">
+                  <div className="flex items-center justify-between gap-2 sm:gap-4">
+                    <div className="flex flex-col items-center gap-2">
+                      <div className="flex h-12 w-12 items-center justify-center rounded-full bg-teal-500 font-bold text-white">
+                        ✓
+                      </div>
+                      <span className="hidden text-center text-xs font-semibold text-teal-600 sm:inline-block sm:text-sm">
+                        Marque
+                      </span>
+                    </div>
+
+                    <div className="hidden h-1 flex-1 rounded-full bg-gradient-to-r from-teal-200 to-teal-300 sm:block" />
+
+                    <div className="flex flex-col items-center gap-2">
+                      <div className="flex h-12 w-12 items-center justify-center rounded-full bg-teal-500 font-bold text-white">
+                        ✓
+                      </div>
+                      <span className="hidden text-center text-xs font-semibold text-teal-600 sm:inline-block sm:text-sm">
+                        Modèle
+                      </span>
+                    </div>
+
+                    <div className="hidden h-1 flex-1 rounded-full bg-gradient-to-r from-teal-200 to-teal-300 sm:block" />
+
+                    <div className="flex flex-col items-center gap-2">
+                      <div className={`flex h-12 w-12 items-center justify-center rounded-full bg-gradient-to-br ${getBrandColors(selectedPartsBrand?.name || '').primary} font-bold text-white shadow-lg`}>
+                        3
+                      </div>
+                      <span className="hidden text-center text-xs font-semibold text-teal-600 sm:inline-block sm:text-sm">
+                        Résultats
+                      </span>
+                    </div>
+                  </div>
+                </div>
+
+                <div className="space-y-4 rounded-2xl border-2 border-slate-200 bg-white p-6 sm:flex sm:items-center sm:justify-between sm:space-y-0">
+                  <div>
+                    <h2 className="text-2xl font-bold text-slate-900 sm:text-3xl">
+                      Pièces compatibles
+                    </h2>
+                    <p className="mt-2 text-sm text-slate-500">
+                      {selectedPartsBrand?.name} • {selectedPartsModel?.name}
+                    </p>
+                  </div>
+
+                  <div className="flex flex-col items-stretch gap-3 sm:flex-row sm:items-center">
+                    <button
+                      onClick={() => setPartsModelId(null)}
+                      className="order-2 inline-flex items-center justify-center gap-2 rounded-xl px-4 py-2 font-semibold text-slate-600 transition-colors hover:bg-slate-100 sm:order-1 sm:justify-start"
+                    >
+                      <ArrowLeft className="h-4 w-4" />
+                      <span className="hidden sm:inline">Changer</span>
+                    </button>
+
+                    <select
+                      value={partsStockFilter}
+                      onChange={(event) => setPartsStockFilter(event.target.value as 'all' | 'in' | 'out')}
+                      className="order-1 rounded-xl border-2 border-slate-200 bg-white px-4 py-2.5 font-semibold text-slate-900 outline-none transition hover:border-slate-300 focus:border-teal-500 sm:order-2"
+                    >
+                      <option value="all">Tous les stocks</option>
+                      <option value="in">En stock</option>
+                      <option value="out">En rupture</option>
+                    </select>
+                  </div>
+                </div>
+
+                {compatiblePartModels.length === 0 ? (
+                  <div className="rounded-2xl border-2 border-slate-200 bg-slate-50 p-12 text-center">
+                    <p className="text-lg font-semibold text-slate-900">Aucune pièce compatible trouvée</p>
+                    <p className="mt-2 text-sm text-slate-500">Essayez de modifier votre sélection</p>
+                  </div>
+                ) : (
+                  <div className="grid gap-4 sm:grid-cols-2 sm:gap-6 lg:grid-cols-3 xl:grid-cols-4">
+                    {compatiblePartModels.map((model) => {
+                      const inStock = (model.stockQty ?? 0) > 0
+                      const brandColors = getBrandColors(selectedPartsBrand?.name || '')
+
+                      return (
+                        <article
+                          key={model.id}
+                          className="group relative overflow-hidden rounded-2xl border-2 border-slate-200 bg-white shadow-sm transition-all duration-300 hover:-translate-y-1 hover:border-slate-300 hover:shadow-xl"
+                        >
+                          <div className={`absolute inset-0 bg-gradient-to-br ${brandColors.primary} opacity-0 transition-opacity duration-300 group-hover:opacity-5`} />
+
+                          <div className="relative flex h-full flex-col space-y-3 p-5">
+                            <div className={`${brandColors.light} flex aspect-video items-center justify-center rounded-xl p-4 transition-transform duration-300 group-hover:scale-105`}>
+                              <div className="text-3xl font-black text-slate-600 opacity-30">
+                                {model.name.charAt(0)}
+                              </div>
+                            </div>
+
+                            <div className="flex-1 space-y-2">
+                              <h4 className="line-clamp-2 text-sm font-bold text-slate-900 transition-colors group-hover:text-slate-950">
+                                {model.name}
+                              </h4>
+                              <p className="text-xs text-slate-500">
+                                {model.brandName} • {model.familyName}
+                              </p>
+                            </div>
+
+                            <div className="flex items-center justify-between border-t border-slate-200 pt-3">
+                              <span
+                                className={`text-xs font-bold uppercase tracking-wide ${
+                                  inStock ? 'text-emerald-600' : 'text-amber-600'
+                                }`}
+                              >
+                                {inStock ? '✓ Stock' : '✕ Rupture'}
+                              </span>
+                            </div>
+
+                            <div className="flex items-center justify-between pt-1">
+                              <p className={`bg-gradient-to-br ${brandColors.primary} bg-clip-text text-lg font-black text-transparent`}>
+                                {model.basePrice.toLocaleString('fr-FR', {
+                                  style: 'currency',
+                                  currency: 'EUR',
+                                })}
+                              </p>
+                              <button
+                                type="button"
+                                onClick={() => openModelConfigurator(model.id)}
+                                className="inline-flex items-center justify-center rounded-full bg-[#2ad1a4] p-2 text-white transition hover:bg-[#20b890]"
+                                title="Ajouter au panier"
+                              >
+                                <ShoppingCart className="h-5 w-5" />
+                              </button>
+                            </div>
+                          </div>
+                        </article>
+                      )
+                    })}
+                  </div>
+                )}
+              </>
+            )}
+          </div>
+          )
         ) : loading ? (
           <div className="flex flex-col items-center justify-center rounded-2xl border border-[#d0d9e3] bg-white p-16 text-[#5a7a9a]">
             <div className="h-10 w-10 animate-spin rounded-full border-4 border-[#d0d9e3] border-t-[#2ad1a4]" />
             <p className="mt-4 text-sm">Chargement du catalogue...</p>
           </div>
-        ) : isConfiguratorDomain ? (
+        ) : isConfiguratorDomain || isProductsDomain ? (
           <div className="grid gap-6 lg:grid-cols-[280px_minmax(0,1fr)]">
             <aside className="space-y-4 lg:sticky lg:top-24 lg:self-start">
               <div className="rounded-2xl border border-[#d0d9e3] bg-white p-4 shadow-sm">
@@ -940,8 +1808,18 @@ export default function Home() {
                   <button
                     type="button"
                     onClick={() => {
-                      setStockFilter('all')
-                      setPoeFilter('all')
+                      if (isConfiguratorDomain) {
+                        setSelectedBrand(null)
+                        setSelectedModel(null)
+                        setStockFilter('all')
+                        setPoeFilter('all')
+                      }
+                      if (isProductsDomain) {
+                        setSelectedBrand(null)
+                        setSelectedSeries(null)
+                        setSelectedModel(null)
+                        setSelectedSpecFilters({})
+                      }
                     }}
                     className="text-sm text-[#7a8fa3] transition hover:text-[#1a3a52]"
                   >
@@ -950,7 +1828,59 @@ export default function Home() {
                 </div>
 
                 <div className="space-y-4">
-                  <div className="rounded-xl bg-[#f8fafc] p-3">
+                  {isConfiguratorDomain && (
+                    <>
+                      <div className="rounded-xl bg-[#f8fafc] p-3">
+                        <p className="mb-2 text-xs font-bold uppercase tracking-widest text-[#7a8fa3]">Marque</p>
+                        <div className="space-y-2">
+                          <label
+                            className={`flex cursor-pointer items-center justify-between rounded-lg border px-3 py-2 text-sm transition ${selectedBrand === null ? 'border-[#2ad1a4] bg-[#f0fdf9] text-[#1a3a52] ring-1 ring-[#2ad1a4]' : 'border-[#d0d9e3] bg-white text-[#334e68] hover:border-[#a5b8cc] hover:bg-[#f9fbfc]'}`}
+                          >
+                            <span className="flex items-center gap-2">
+                              <input
+                                type="radio"
+                                name="brand-filter"
+                                checked={selectedBrand === null}
+                                onChange={() => {
+                                  setSelectedBrand(null)
+                                  setSelectedModel(null)
+                                }}
+                                className="h-4 w-4 accent-[#2ad1a4]"
+                              />
+                              Toutes
+                            </span>
+                            <span className="text-xs text-[#7a8fa3]">({configuratorBrandTotal})</span>
+                          </label>
+
+                          {configuratorBrandOptions.map((item) => {
+                            const active = selectedBrand === item.brandId
+
+                            return (
+                              <label
+                                key={item.brandId}
+                                className={`flex cursor-pointer items-center justify-between rounded-lg border px-3 py-2 text-sm transition ${active ? 'border-[#2ad1a4] bg-[#f0fdf9] text-[#1a3a52] ring-1 ring-[#2ad1a4]' : 'border-[#d0d9e3] bg-white text-[#334e68] hover:border-[#a5b8cc] hover:bg-[#f9fbfc]'}`}
+                              >
+                                <span className="flex items-center gap-2">
+                                  <input
+                                    type="radio"
+                                    name="brand-filter"
+                                    checked={active}
+                                    onChange={() => {
+                                      setSelectedBrand(item.brandId)
+                                      setSelectedModel(null)
+                                    }}
+                                    className="h-4 w-4 accent-[#2ad1a4]"
+                                  />
+                                  {item.name}
+                                </span>
+                                <span className="text-xs text-[#7a8fa3]">({item.count})</span>
+                              </label>
+                            )
+                          })}
+                        </div>
+                      </div>
+
+                      <div className="rounded-xl bg-[#f8fafc] p-3">
                     <p className="mb-2 text-xs font-bold uppercase tracking-widest text-[#7a8fa3]">Stock</p>
                     <div className="space-y-2">
                       {[
@@ -979,9 +1909,9 @@ export default function Home() {
                         )
                       })}
                     </div>
-                  </div>
+                      </div>
 
-                  <div className="rounded-xl bg-[#f8fafc] p-3">
+                      <div className="rounded-xl bg-[#f8fafc] p-3">
                     <p className="mb-2 text-xs font-bold uppercase tracking-widest text-[#7a8fa3]">PoE</p>
                     <div className="space-y-2">
                       {[
@@ -1009,7 +1939,166 @@ export default function Home() {
                         )
                       })}
                     </div>
-                  </div>
+                      </div>
+                    </>
+                  )}
+
+                  {isProductsDomain && (
+                    <>
+                      <div className="rounded-xl bg-[#f8fafc] p-3">
+                        <p className="mb-2 text-xs font-bold uppercase tracking-widest text-[#7a8fa3]">Marque</p>
+                        <div className="space-y-2">
+                          <label
+                            className={`flex cursor-pointer items-center justify-between rounded-lg border px-3 py-2 text-sm transition ${selectedBrand === null ? 'border-[#2ad1a4] bg-[#f0fdf9] text-[#1a3a52] ring-1 ring-[#2ad1a4]' : 'border-[#d0d9e3] bg-white text-[#334e68] hover:border-[#a5b8cc] hover:bg-[#f9fbfc]'}`}
+                          >
+                            <span className="flex items-center gap-2">
+                              <input
+                                type="radio"
+                                name="products-brand-filter"
+                                checked={selectedBrand === null}
+                                onChange={() => {
+                                  setSelectedBrand(null)
+                                  setSelectedSeries(null)
+                                  setSelectedModel(null)
+                                  setSelectedSpecFilters({})
+                                }}
+                                className="h-4 w-4 accent-[#2ad1a4]"
+                              />
+                              Toutes
+                            </span>
+                            <span className="text-xs text-[#7a8fa3]">({productBrandTotal})</span>
+                          </label>
+
+                          {productBrandOptions.map((item) => {
+                            const active = selectedBrand === item.brandId
+
+                            return (
+                              <label
+                                key={item.brandId}
+                                className={`flex cursor-pointer items-center justify-between rounded-lg border px-3 py-2 text-sm transition ${active ? 'border-[#2ad1a4] bg-[#f0fdf9] text-[#1a3a52] ring-1 ring-[#2ad1a4]' : 'border-[#d0d9e3] bg-white text-[#334e68] hover:border-[#a5b8cc] hover:bg-[#f9fbfc]'}`}
+                              >
+                                <span className="flex items-center gap-2">
+                                  <input
+                                    type="radio"
+                                    name="products-brand-filter"
+                                    checked={active}
+                                    onChange={() => {
+                                      setSelectedBrand(item.brandId)
+                                      setSelectedSeries(null)
+                                      setSelectedModel(null)
+                                      setSelectedSpecFilters({})
+                                    }}
+                                    className="h-4 w-4 accent-[#2ad1a4]"
+                                  />
+                                  {item.name}
+                                </span>
+                                <span className="text-xs text-[#7a8fa3]">({item.count})</span>
+                              </label>
+                            )
+                          })}
+                        </div>
+                      </div>
+
+                      <div className="rounded-xl bg-[#f8fafc] p-3">
+                        <p className="mb-2 text-xs font-bold uppercase tracking-widest text-[#7a8fa3]">
+                          {selectedBrandRecord ? `Famille - ${selectedBrandRecord.name}` : 'Famille'}
+                        </p>
+                        {!selectedBrand ? (
+                          <p className="rounded-lg border border-[#d0d9e3] bg-white px-3 py-2 text-sm text-[#5a7a9a]">
+                            Selectionnez une marque pour afficher les familles.
+                          </p>
+                        ) : productFamilyOptions.length === 0 ? (
+                          <p className="rounded-lg border border-[#d0d9e3] bg-white px-3 py-2 text-sm text-[#5a7a9a]">
+                            Aucune famille trouvee pour cette marque.
+                          </p>
+                        ) : (
+                          <div className="space-y-2">
+                            <label
+                              className={`flex cursor-pointer items-center justify-between rounded-lg border px-3 py-2 text-sm transition ${selectedSeries === null ? 'border-[#2ad1a4] bg-[#f0fdf9] text-[#1a3a52] ring-1 ring-[#2ad1a4]' : 'border-[#d0d9e3] bg-white text-[#334e68] hover:border-[#a5b8cc] hover:bg-[#f9fbfc]'}`}
+                            >
+                              <span className="flex items-center gap-2">
+                                <input
+                                  type="radio"
+                                  name="products-family-filter"
+                                  checked={selectedSeries === null}
+                                  onChange={() => {
+                                    setSelectedSeries(null)
+                                    setSelectedModel(null)
+                                    setSelectedSpecFilters({})
+                                  }}
+                                  className="h-4 w-4 accent-[#2ad1a4]"
+                                />
+                                Toutes
+                              </span>
+                              <span className="text-xs text-[#7a8fa3]">({productFamilyTotal})</span>
+                            </label>
+
+                            {productFamilyOptions.map((item) => {
+                              const active = selectedSeries === item.seriesId
+
+                              return (
+                                <label
+                                  key={item.seriesId}
+                                  className={`flex cursor-pointer items-center justify-between rounded-lg border px-3 py-2 text-sm transition ${active ? 'border-[#2ad1a4] bg-[#f0fdf9] text-[#1a3a52] ring-1 ring-[#2ad1a4]' : 'border-[#d0d9e3] bg-white text-[#334e68] hover:border-[#a5b8cc] hover:bg-[#f9fbfc]'}`}
+                                >
+                                  <span className="flex items-center gap-2">
+                                    <input
+                                      type="radio"
+                                      name="products-family-filter"
+                                      checked={active}
+                                      onChange={() => {
+                                        setSelectedSeries(item.seriesId)
+                                        setSelectedModel(null)
+                                        setSelectedSpecFilters({})
+                                      }}
+                                      className="h-4 w-4 accent-[#2ad1a4]"
+                                    />
+                                    {item.name}
+                                  </span>
+                                  <span className="text-xs text-[#7a8fa3]">({item.count})</span>
+                                </label>
+                              )
+                            })}
+                          </div>
+                        )}
+                      </div>
+
+                      {!selectedSeries ? (
+                        <p className="rounded-xl bg-[#f8fafc] p-3 text-sm text-[#5a7a9a]">Selectionnez une famille pour afficher les filtres.</p>
+                      ) : standardSpecGroups.length === 0 ? (
+                        <p className="rounded-xl bg-[#f8fafc] p-3 text-sm text-[#5a7a9a]">Aucun filtre configure pour cette famille.</p>
+                      ) : (
+                        standardSpecGroups.map((group) => (
+                          <div key={group.key} className="rounded-xl bg-[#f8fafc] p-3">
+                            <p className="mb-2 text-xs font-bold uppercase tracking-widest text-[#7a8fa3]">{group.key}</p>
+                            <div className="space-y-2">
+                              {group.options.map((option) => {
+                                const checked = (selectedSpecFilters[group.key] ?? []).includes(option.value)
+
+                                return (
+                                  <label
+                                    key={`${group.key}-${option.value}`}
+                                    className={`flex cursor-pointer items-center justify-between rounded-lg border px-3 py-2 text-sm transition ${checked ? 'border-[#2ad1a4] bg-[#f0fdf9] text-[#1a3a52] ring-1 ring-[#2ad1a4]' : 'border-[#d0d9e3] bg-white text-[#334e68] hover:border-[#a5b8cc] hover:bg-[#f9fbfc]'}`}
+                                  >
+                                    <span className="flex items-center gap-2">
+                                      <input
+                                        type="checkbox"
+                                        checked={checked}
+                                        onChange={(event) => toggleStandardSpecFilter(group.key, option.value, event.target.checked)}
+                                        className="h-4 w-4 accent-[#2ad1a4]"
+                                      />
+                                      {option.value}
+                                    </span>
+                                    <span className="text-xs text-[#7a8fa3]">({option.count})</span>
+                                  </label>
+                                )
+                              })}
+                            </div>
+                          </div>
+                        ))
+                      )}
+                    </>
+                  )}
                 </div>
               </div>
             </aside>
@@ -1017,7 +2106,7 @@ export default function Home() {
             <div className="space-y-5">
               <div className="flex flex-col gap-3 rounded-2xl border border-[#d0d9e3] bg-white px-4 py-3 shadow-sm lg:flex-row lg:items-center lg:justify-between">
                 <p className="text-sm text-[#5a7a9a]">
-                  {sortedModels.length === 0 ? 'Aucun produit disponible' : `Produits ${resultsStart}-${resultsEnd} sur ${sortedModels.length}`}
+                  {sortedModels.length === 0 ? 'Aucun article disponible' : `${resultsStart}-${resultsEnd} sur ${sortedModels.length}`}
                 </p>
                 <div className="flex items-center gap-3">
                   <span className="text-sm text-[#5a7a9a]">Tri</span>
@@ -1049,9 +2138,10 @@ export default function Home() {
                 <div className="grid gap-5 sm:grid-cols-2 xl:grid-cols-3">
                   {visibleModels.map((model) => {
                     const brand = catalog.brands.find((brandItem) => brandItem.id === model.brandId)
-                    const seriesItem = catalog.series.find((seriesEntry) => seriesEntry.id === model.seriesId)
                     const stockQty = model.stockQty ?? 0
                     const isInStock = stockQty > 0
+                    const { port, interface: interfaceType } = getPortAndInterface(model.specs)
+                    const fullName = [model.name, port, interfaceType].filter(Boolean).join(' / ')
 
                     return (
                       <article key={model.id} className="group flex flex-col overflow-hidden rounded-xl border border-[#d0d9e3] bg-white shadow-sm transition-all duration-200 hover:-translate-y-1 hover:border-[#a5b8cc] hover:shadow-lg">
@@ -1073,45 +2163,31 @@ export default function Home() {
 
                         <div className="flex flex-1 flex-col gap-3 p-4">
                           <div>
-                            <h3 className="line-clamp-2 font-bold leading-snug text-[#1a3a52] group-hover:text-[#0f2d45]">{model.name}</h3>
-                            <p className="mt-0.5 text-[11px] text-[#7a8fa3]">Ref: {model.reference}</p>
-                            {seriesItem && <p className="mt-0.5 text-[11px] text-[#7a8fa3]">Serie: {seriesItem.name}</p>}
-                            {model.shortDescription && <p className="mt-1 line-clamp-2 text-xs text-[#5a7a9a]">{model.shortDescription}</p>}
+                            <h3 className="line-clamp-2 font-bold leading-snug text-[#1a3a52] group-hover:text-[#0f2d45]">{fullName}</h3>
+                            {brand && <p className="mt-1 text-sm font-semibold text-[#1a3a52]">{brand.name}</p>}
                           </div>
-
-                          <div className="flex flex-wrap gap-1.5">
-                            {brand && <span className="rounded-full bg-[#eef3f8] px-2.5 py-0.5 text-[11px] font-semibold text-[#1a3a52]">{brand.name}</span>}
-                            {seriesItem && <span className="rounded-full bg-[#eef3f8] px-2.5 py-0.5 text-[11px] font-medium text-[#334e68]">{seriesItem.name}</span>}
-                            <span className={isInStock ? 'rounded-full bg-emerald-100 px-2.5 py-0.5 text-[11px] font-semibold text-emerald-700' : 'rounded-full bg-amber-100 px-2.5 py-0.5 text-[11px] font-semibold text-amber-700'}>
-                              {isInStock ? 'En stock' : 'Rupture'}
-                            </span>
-                            <span className={model.poe ? 'rounded-full bg-cyan-100 px-2.5 py-0.5 text-[11px] font-semibold text-cyan-700' : 'rounded-full bg-slate-200 px-2.5 py-0.5 text-[11px] font-semibold text-slate-600'}>
-                              {model.poe ? 'PoE Oui' : 'PoE Non'}
-                            </span>
-                            <span className={model.condition === 'CONFIGURABLE' ? 'rounded-full bg-[#e8faf4] px-2.5 py-0.5 text-[11px] font-semibold text-[#0f7a54]' : 'rounded-full bg-[#eef3f8] px-2.5 py-0.5 text-[11px] font-semibold text-[#1a3a52]'}>
-                              {model.condition === 'CONFIGURABLE' ? 'Configurable' : 'Standard'}
-                            </span>
-                          </div>
-
-                          {model.condition === 'STANDARD' && (model.specs?.length ?? 0) > 0 && (
-                            <div className="flex flex-wrap gap-1.5">
-                              {model.specs?.slice(0, 4).map((entry) => (
-                                <span key={`${model.id}-${entry.key}-${entry.value}`} className="rounded-full border border-[#d0d9e3] px-2.5 py-0.5 text-[11px] text-[#334e68]">
-                                  {entry.key}: {entry.value}
-                                </span>
-                              ))}
-                            </div>
-                          )}
 
                           <div className="mt-auto flex items-center justify-between border-t border-[#f0f3f6] pt-3">
-                            <p className="text-xl font-black text-[#1a3a52]">{model.basePrice.toLocaleString('fr-FR', { style: 'currency', currency: 'EUR' })}</p>
+                            <div className="flex items-center gap-2">
+                              <span className={isInStock ? 'text-xs font-semibold text-emerald-700' : 'text-xs font-semibold text-amber-700'}>
+                                {isInStock ? 'En stock' : 'Rupture'}
+                              </span>
+                            </div>
+                          </div>
+
+                          <div className="flex items-center justify-between pt-2">
+                            <p className="text-lg font-black text-[#1a3a52]">{model.basePrice.toLocaleString('fr-FR', { style: 'currency', currency: 'EUR' })}</p>
                             <button
                               type="button"
                               onClick={() => openModelConfigurator(model.id)}
-                              className={`inline-flex items-center gap-2 rounded-full px-3 py-1.5 text-xs font-bold transition ${model.condition === 'CONFIGURABLE' ? 'bg-[#2ad1a4] text-[#1a3a52] hover:bg-[#20b890]' : 'bg-[#eef3f8] text-[#1a3a52] hover:bg-[#dce8f2]'}`}
+                              className="inline-flex items-center justify-center rounded-full bg-[#2ad1a4] p-2 text-white transition hover:bg-[#20b890]"
+                              title={isConfiguratorDomain ? 'Configurer le modèle' : 'Ajouter au panier'}
                             >
-                              {model.condition === 'CONFIGURABLE' ? 'Configurer' : 'Voir fiche'}
-                              <ChevronRight className="h-3 w-3" />
+                              {isConfiguratorDomain ? (
+                                <Sliders className="h-5 w-5" />
+                              ) : (
+                                <ShoppingCart className="h-5 w-5" />
+                              )}
                             </button>
                           </div>
                         </div>
@@ -1168,9 +2244,10 @@ export default function Home() {
             <div className="grid gap-5 sm:grid-cols-2 xl:grid-cols-3">
               {visibleModels.map((model) => {
                 const brand = catalog.brands.find((brandItem) => brandItem.id === model.brandId)
-                const seriesItem = catalog.series.find((seriesEntry) => seriesEntry.id === model.seriesId)
                 const stockQty = model.stockQty ?? 0
                 const isInStock = stockQty > 0
+                const { port, interface: interfaceType } = getPortAndInterface(model.specs)
+                const fullName = [model.name, port, interfaceType].filter(Boolean).join(' / ')
 
                 return (
                   <article key={model.id} className="group flex flex-col overflow-hidden rounded-xl border border-[#d0d9e3] bg-white shadow-sm transition-all duration-200 hover:-translate-y-1 hover:border-[#a5b8cc] hover:shadow-lg">
@@ -1192,45 +2269,27 @@ export default function Home() {
 
                     <div className="flex flex-1 flex-col gap-3 p-4">
                       <div>
-                        <h3 className="line-clamp-2 font-bold leading-snug text-[#1a3a52] group-hover:text-[#0f2d45]">{model.name}</h3>
-                        <p className="mt-0.5 text-[11px] text-[#7a8fa3]">Ref: {model.reference}</p>
-                        {seriesItem && <p className="mt-0.5 text-[11px] text-[#7a8fa3]">Serie: {seriesItem.name}</p>}
-                        {model.shortDescription && <p className="mt-1 line-clamp-2 text-xs text-[#5a7a9a]">{model.shortDescription}</p>}
+                        <h3 className="line-clamp-2 font-bold leading-snug text-[#1a3a52] group-hover:text-[#0f2d45]">{fullName}</h3>
+                        {brand && <p className="mt-1 text-sm font-semibold text-[#1a3a52]">{brand.name}</p>}
                       </div>
-
-                      <div className="flex flex-wrap gap-1.5">
-                        {brand && <span className="rounded-full bg-[#eef3f8] px-2.5 py-0.5 text-[11px] font-semibold text-[#1a3a52]">{brand.name}</span>}
-                        {seriesItem && <span className="rounded-full bg-[#eef3f8] px-2.5 py-0.5 text-[11px] font-medium text-[#334e68]">{seriesItem.name}</span>}
-                        <span className={isInStock ? 'rounded-full bg-emerald-100 px-2.5 py-0.5 text-[11px] font-semibold text-emerald-700' : 'rounded-full bg-amber-100 px-2.5 py-0.5 text-[11px] font-semibold text-amber-700'}>
-                          {isInStock ? 'En stock' : 'Rupture'}
-                        </span>
-                        <span className={model.poe ? 'rounded-full bg-cyan-100 px-2.5 py-0.5 text-[11px] font-semibold text-cyan-700' : 'rounded-full bg-slate-200 px-2.5 py-0.5 text-[11px] font-semibold text-slate-600'}>
-                          {model.poe ? 'PoE Oui' : 'PoE Non'}
-                        </span>
-                        <span className={model.condition === 'CONFIGURABLE' ? 'rounded-full bg-[#e8faf4] px-2.5 py-0.5 text-[11px] font-semibold text-[#0f7a54]' : 'rounded-full bg-[#eef3f8] px-2.5 py-0.5 text-[11px] font-semibold text-[#1a3a52]'}>
-                          {model.condition === 'CONFIGURABLE' ? 'Configurable' : 'Standard'}
-                        </span>
-                      </div>
-
-                      {model.condition === 'STANDARD' && (model.specs?.length ?? 0) > 0 && (
-                        <div className="flex flex-wrap gap-1.5">
-                          {model.specs?.slice(0, 4).map((entry) => (
-                            <span key={`${model.id}-${entry.key}-${entry.value}`} className="rounded-full border border-[#d0d9e3] px-2.5 py-0.5 text-[11px] text-[#334e68]">
-                              {entry.key}: {entry.value}
-                            </span>
-                          ))}
-                        </div>
-                      )}
 
                       <div className="mt-auto flex items-center justify-between border-t border-[#f0f3f6] pt-3">
-                        <p className="text-xl font-black text-[#1a3a52]">{model.basePrice.toLocaleString('fr-FR', { style: 'currency', currency: 'EUR' })}</p>
+                        <div className="flex items-center gap-2">
+                          <span className={isInStock ? 'text-xs font-semibold text-emerald-700' : 'text-xs font-semibold text-amber-700'}>
+                            {isInStock ? 'En stock' : 'Rupture'}
+                          </span>
+                        </div>
+                      </div>
+
+                      <div className="flex items-center justify-between pt-2">
+                        <p className="text-lg font-black text-[#1a3a52]">{model.basePrice.toLocaleString('fr-FR', { style: 'currency', currency: 'EUR' })}</p>
                         <button
                           type="button"
                           onClick={() => openModelConfigurator(model.id)}
-                          className={`inline-flex items-center gap-2 rounded-full px-3 py-1.5 text-xs font-bold transition ${model.condition === 'CONFIGURABLE' ? 'bg-[#2ad1a4] text-[#1a3a52] hover:bg-[#20b890]' : 'bg-[#eef3f8] text-[#1a3a52] hover:bg-[#dce8f2]'}`}
+                          className="inline-flex items-center justify-center rounded-full bg-[#2ad1a4] p-2 text-white transition hover:bg-[#20b890]"
+                          title="Ajouter au panier"
                         >
-                          {model.condition === 'CONFIGURABLE' ? 'Configurer' : 'Voir fiche'}
-                          <ChevronRight className="h-3 w-3" />
+                          <ShoppingCart className="h-5 w-5" />
                         </button>
                       </div>
                     </div>

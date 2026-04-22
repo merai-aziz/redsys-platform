@@ -4,7 +4,7 @@ import { useForm } from 'react-hook-form'
 import { zodResolver } from '@hookform/resolvers/zod'
 import * as z from 'zod'
 import Link from 'next/link'
-import { Layers, Eye, EyeOff, Loader2 } from 'lucide-react'
+import { Eye, EyeOff, Loader2 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
@@ -55,17 +55,6 @@ export default function LoginPage() {
   return (
     <div className="w-full max-w-md px-4">
       <div className="bg-[#111318] border border-[#2A2D38] rounded-2xl p-10">
-        {/* Brand */}
-        <div className="flex items-center gap-3 mb-8">
-          <div className="w-9 h-9 bg-gradient-to-br from-[#4F6EF7] to-[#7C3AED] rounded-xl flex items-center justify-center">
-            <Layers className="w-4 h-4 text-white" />
-          </div>
-          <span className="text-xl font-bold text-white tracking-tight">Redsys</span>
-        </div>
-
-        <h1 className="text-2xl font-bold text-white mb-1">Bon retour 👋</h1>
-        <p className="text-[#8892A4] text-sm mb-8">Connectez-vous à votre espace</p>
-
         <form onSubmit={handleSubmit(onSubmit)} className="space-y-5">
           <div>
             <Label className="text-xs text-[#8892A4] uppercase tracking-wider mb-2 block">

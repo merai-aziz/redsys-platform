@@ -1,4 +1,5 @@
 import { NextResponse } from 'next/server'
+import { Prisma } from '@prisma/client'
 
 import { requireAdmin } from '@/lib/auth'
 import { prisma } from '@/lib/prisma'
@@ -29,6 +30,7 @@ export async function PUT(request: Request, context: Params) {
     in_stock?: boolean
     poe?: boolean
     filter_value_ids?: number[]
+    compatible_product_ids?: number[]
     specs?: Array<{ key?: string; value?: string }>
   }
 
@@ -60,6 +62,9 @@ export async function PUT(request: Request, context: Params) {
   const filterValueIds = Array.isArray(body.filter_value_ids)
     ? body.filter_value_ids.filter((value): value is number => Number.isInteger(value))
     : []
+  const compatibleProductIds = Array.isArray(body.compatible_product_ids)
+    ? body.compatible_product_ids.filter((value): value is number => Number.isInteger(value))
+    : []
 
   const specs = Array.isArray(body.specs)
     ? body.specs
@@ -72,7 +77,7 @@ export async function PUT(request: Request, context: Params) {
 
   const normalizedStock = inStock ? Math.max(1, Math.trunc(stockQty)) : 0
 
-  const product = await prisma.$transaction(async (tx: any) => {
+  const product = await prisma.$transaction(async (tx) => {
     await tx.product.update({
       where: { id: productId },
       data: {
@@ -112,8 +117,30 @@ export async function PUT(request: Request, context: Params) {
       })
     }
 
-    return tx.product.findUnique({ where: { id: productId } })
+    return tx.product.findUnique({
+      where: { id: productId },
+    })
   })
+
+  try {
+    await prisma.productCompatibility.deleteMany({ where: { part_product_id: productId } })
+
+    if (type === 'STANDARD' && compatibleProductIds.length > 0) {
+      await prisma.productCompatibility.createMany({
+        data: compatibleProductIds
+          .filter((targetProductId) => targetProductId !== productId)
+          .map((targetProductId) => ({
+            part_product_id: productId,
+            target_product_id: targetProductId,
+          })),
+        skipDuplicates: true,
+      })
+    }
+  } catch (error) {
+    if (!(error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2021')) {
+      throw error
+    }
+  }
 
   return NextResponse.json({ product })
 }

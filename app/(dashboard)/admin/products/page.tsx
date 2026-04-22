@@ -33,6 +33,9 @@ interface Product {
     name: string
     values: Array<{ id: number; value: string; price: string; quantity: number }>
   }>
+  compatibilities_as_part?: Array<{
+    target_product_id: number
+  }>
 }
 
 const emptyForm = {
@@ -59,6 +62,8 @@ export default function AdminProductsPage() {
   const [specRows, setSpecRows] = useState<Array<{ key: string; value: string }>>([{ key: '', value: '' }])
   const [editingId, setEditingId] = useState<number | null>(null)
   const [showDialog, setShowDialog] = useState(false)
+  const [compatibleModelIds, setCompatibleModelIds] = useState<number[]>([])
+  const [compatibleSearch, setCompatibleSearch] = useState('')
 
   const [optionDialogProduct, setOptionDialogProduct] = useState<Product | null>(null)
   const [optionName, setOptionName] = useState('')
@@ -66,6 +71,16 @@ export default function AdminProductsPage() {
   const [editingOptionId, setEditingOptionId] = useState<number | null>(null)
 
   async function loadAll() {
+    async function safeJson(response: Response) {
+      const text = await response.text()
+      if (!text) return null
+      try {
+        return JSON.parse(text) as Record<string, unknown>
+      } catch {
+        return null
+      }
+    }
+
     const [productsRes, brandsRes, categoriesRes, familiesRes] = await Promise.all([
       fetch('/api/admin/products'),
       fetch('/api/admin/brands'),
@@ -74,16 +89,28 @@ export default function AdminProductsPage() {
     ])
 
     const [productsJson, brandsJson, categoriesJson, familiesJson] = await Promise.all([
-      productsRes.json(),
-      brandsRes.json(),
-      categoriesRes.json(),
-      familiesRes.json(),
+      safeJson(productsRes),
+      safeJson(brandsRes),
+      safeJson(categoriesRes),
+      safeJson(familiesRes),
     ])
 
-    setProducts(productsJson.products || [])
-    setBrands(brandsJson.brands || [])
-    setCategories(categoriesJson.categories || [])
-    setFamilies(familiesJson.families || [])
+    if (!productsRes.ok || !brandsRes.ok || !categoriesRes.ok || !familiesRes.ok) {
+      const errorMessage = [
+        (productsJson as { error?: string } | null)?.error,
+        (brandsJson as { error?: string } | null)?.error,
+        (categoriesJson as { error?: string } | null)?.error,
+        (familiesJson as { error?: string } | null)?.error,
+      ].find(Boolean)
+
+      toast.error(errorMessage || 'Chargement des donnees impossible')
+      return
+    }
+
+    setProducts((productsJson as { products?: Product[] } | null)?.products || [])
+    setBrands((brandsJson as { brands?: Brand[] } | null)?.brands || [])
+    setCategories((categoriesJson as { categories?: Category[] } | null)?.categories || [])
+    setFamilies((familiesJson as { families?: Family[] } | null)?.families || [])
   }
 
   useEffect(() => {
@@ -108,14 +135,43 @@ export default function AdminProductsPage() {
     return families.filter((family) => family.category_id === categoryId)
   }, [families, form.category_id])
 
+  const selectedFamilyRecord = useMemo(
+    () => families.find((family) => String(family.id) === form.family_id) ?? null,
+    [families, form.family_id],
+  )
+
+  const isSparePartSelection = useMemo(() => {
+    if (!selectedFamilyRecord) return false
+    const normalized = selectedFamilyRecord.name
+      .toLowerCase()
+      .normalize('NFD')
+      .replace(/[\u0300-\u036f]/g, '')
+    return normalized.includes('piece') || normalized.includes('detache')
+  }, [selectedFamilyRecord])
+
+  const compatibleModelChoices = useMemo(() => {
+    const q = compatibleSearch.trim().toLowerCase()
+    return products
+      .filter((product) => product.type === 'CONFIGURABLE')
+      .filter((product) => (editingId ? product.id !== editingId : true))
+      .filter((product) => {
+        if (!q) return true
+        const haystack = `${product.name} ${product.brand.name} ${product.family.name} ${product.category.name}`.toLowerCase()
+        return haystack.includes(q)
+      })
+      .sort((a, b) => a.name.localeCompare(b.name))
+  }, [compatibleSearch, editingId, products])
+
   function openCreate() {
     setEditingId(null)
     setForm(emptyForm)
     setSpecRows([{ key: '', value: '' }])
+    setCompatibleModelIds([])
+    setCompatibleSearch('')
     setShowDialog(true)
   }
 
-  function openEdit(product: Product) {
+  async function openEdit(product: Product) {
     setEditingId(product.id)
     setForm({
       name: product.name,
@@ -135,6 +191,22 @@ export default function AdminProductsPage() {
         ? product.specs.map((spec) => ({ key: spec.spec_key, value: spec.spec_value }))
         : [{ key: '', value: '' }],
     )
+
+    const preloadedIds = Array.isArray(product.compatibilities_as_part)
+      ? product.compatibilities_as_part.map((entry) => entry.target_product_id)
+      : []
+    setCompatibleModelIds(preloadedIds)
+    setCompatibleSearch('')
+
+    const compatRes = await fetch(`/api/admin/products/${product.id}/compatibilities`)
+    if (compatRes.ok) {
+      const compatJson = await compatRes.json().catch(() => null)
+      const ids = Array.isArray(compatJson?.compatibleProductIds)
+        ? compatJson.compatibleProductIds.filter((value: unknown): value is number => Number.isInteger(value))
+        : []
+      setCompatibleModelIds(ids)
+    }
+
     setShowDialog(true)
   }
 
@@ -147,6 +219,7 @@ export default function AdminProductsPage() {
       category_id: Number(form.category_id),
       family_id: Number(form.family_id),
       specs: form.type === 'STANDARD' ? specRows.filter((entry) => entry.key.trim() && entry.value.trim()) : [],
+      compatible_product_ids: form.type === 'STANDARD' && isSparePartSelection ? compatibleModelIds : [],
     }
 
     const url = editingId ? `/api/admin/products/${editingId}` : '/api/admin/products'
@@ -485,6 +558,46 @@ export default function AdminProductsPage() {
                   <Button type="button" variant="outline" onClick={() => setSpecRows((prev) => [...prev, { key: '', value: '' }])}>
                     Ajouter une spec
                   </Button>
+                </div>
+              </div>
+            )}
+
+            {form.type === 'STANDARD' && isSparePartSelection && (
+              <div className="space-y-2 sm:col-span-2">
+                <Label>Modeles compatibles (serveur / storage / reseau)</Label>
+                <div className="space-y-2 rounded border p-3">
+                  <Input
+                    placeholder="Rechercher un modele..."
+                    value={compatibleSearch}
+                    onChange={(e) => setCompatibleSearch(e.target.value)}
+                  />
+                  <div className="max-h-64 space-y-2 overflow-y-auto rounded border bg-slate-50 p-2">
+                    {compatibleModelChoices.length === 0 ? (
+                      <p className="text-sm text-slate-500">Aucun modele configurable trouve.</p>
+                    ) : compatibleModelChoices.map((product) => {
+                      const checked = compatibleModelIds.includes(product.id)
+                      return (
+                        <label key={product.id} className="flex items-start gap-2 rounded border bg-white px-2 py-2 text-sm">
+                          <input
+                            type="checkbox"
+                            checked={checked}
+                            onChange={(e) => {
+                              setCompatibleModelIds((previous) => {
+                                if (e.target.checked) return Array.from(new Set([...previous, product.id]))
+                                return previous.filter((id) => id !== product.id)
+                              })
+                            }}
+                          />
+                          <span>
+                            {product.name}
+                            <span className="block text-xs text-slate-500">
+                              {product.brand.name} / {product.family.name} / {product.category.name}
+                            </span>
+                          </span>
+                        </label>
+                      )
+                    })}
+                  </div>
                 </div>
               </div>
             )}

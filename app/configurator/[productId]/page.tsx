@@ -1,6 +1,8 @@
 import { notFound } from 'next/navigation'
 import Link from 'next/link'
+import Image from 'next/image'
 
+import { ConfiguratorTopMenu } from '@/components/catalog/configurator-top-menu'
 import { ProductConfigurator } from '@/components/configurator/product-configurator'
 import { prisma } from '@/lib/prisma'
 
@@ -50,14 +52,37 @@ export default async function ConfiguratorPage({ params }: PageProps) {
         <div className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8">
           <div className="flex items-center justify-between gap-6 py-4">
             <div className="shrink-0 text-xl font-black tracking-tight text-white">
-              Redsys<span className="text-[#2ad1a4]">Tech</span>
+              <Link href="/" aria-label="Accueil" className="block">
+                <Image
+                  src="/redsys-logo.png"
+                  alt="Redsys"
+                  width={220}
+                  height={64}
+                  className="h-12 w-auto"
+                  priority
+                />
+              </Link>
             </div>
             <div className="flex items-center gap-3 text-sm">
-              <Link href="/" className="flex items-center gap-2 rounded-full bg-[#2ad1a4] px-4 py-2 font-bold text-[#1a3a52] transition hover:bg-[#20b890]">
+              <Link
+                href="/login"
+                className="hidden items-center gap-2 rounded-full px-3 py-1.5 font-semibold text-white/80 transition hover:bg-white/10 hover:text-white sm:flex"
+              >
+                Se connecter
+              </Link>
+              <Link
+                href="/cart"
+                className="flex items-center gap-2 rounded-full bg-[#2ad1a4] px-4 py-2 font-bold text-[#1a3a52] transition hover:bg-[#20b890]"
+              >
+                Panier
+              </Link>
+              <Link href="/" className="flex items-center gap-2 rounded-full border border-white/20 px-4 py-2 font-bold text-white transition hover:bg-white/10">
                 ← Retour
               </Link>
             </div>
           </div>
+
+          <ConfiguratorTopMenu />
         </div>
       </header>
 

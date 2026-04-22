@@ -39,7 +39,7 @@ export async function PUT(request: Request, context: Params) {
     return NextResponse.json({ error: 'Option introuvable' }, { status: 404 })
   }
 
-  const option = await prisma.$transaction(async (tx: any) => {
+  const option = await prisma.$transaction(async (tx) => {
     await tx.configurationOption.update({
       where: { id: parsedOptionId },
       data: { name },

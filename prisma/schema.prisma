@@ -99,6 +99,7 @@ model Family {
   category_id Int
   category    Category  @relation(fields: [category_id], references: [id], onDelete: Cascade)
   products    Product[]
+  family_filters FamilyFilter[]
 
   @@unique([name, category_id])
   @@index([category_id])
@@ -126,6 +127,10 @@ model Product {
   configuration_options   ConfigurationOption[]
   orderItems              OrderItem[]
   product_filter_values   ProductFilterValue[]
+  compatibilities_as_part   ProductCompatibility[] @relation("PartCompatibilities")
+  compatibilities_as_target ProductCompatibility[] @relation("TargetCompatibilities")
+  sparepart_filters_as_part SparepartFilter[] @relation("SparepartFiltersAsPart")
+  sparepart_filters_as_target SparepartFilter[] @relation("SparepartFiltersAsTarget")
   recommendationItems     RecommendationItem[]
   selected_configurations SelectedConfiguration[]
 
@@ -134,6 +139,17 @@ model Product {
   @@index([family_id])
   @@index([category_id])
   @@map("catalog_products")
+}
+
+model ProductCompatibility {
+  part_product_id   Int
+  target_product_id Int
+  part_product      Product @relation("PartCompatibilities", fields: [part_product_id], references: [id], onDelete: Cascade)
+  target_product    Product @relation("TargetCompatibilities", fields: [target_product_id], references: [id], onDelete: Cascade)
+
+  @@id([part_product_id, target_product_id])
+  @@index([target_product_id])
+  @@map("product_compatibilities")
 }
 
 model ConfigurationOption {
@@ -202,8 +218,37 @@ model Filter {
   id            Int           @id @default(autoincrement())
   name          String        @unique
   filter_values FilterValue[]
+  family_filters FamilyFilter[]
+  sparepart_filters SparepartFilter[]
 
   @@map("catalog_filters")
+}
+
+model FamilyFilter {
+  family_id Int
+  filter_id Int
+  sort_order Int @default(0)
+  family Family @relation(fields: [family_id], references: [id], onDelete: Cascade)
+  filter Filter @relation(fields: [filter_id], references: [id], onDelete: Cascade)
+
+  @@id([family_id, filter_id])
+  @@index([filter_id])
+  @@map("family_filters")
+}
+
+model SparepartFilter {
+  part_product_id Int
+  target_product_id Int
+  filter_id Int
+  sort_order Int @default(0)
+  part_product Product @relation("SparepartFiltersAsPart", fields: [part_product_id], references: [id], onDelete: Cascade)
+  target_product Product @relation("SparepartFiltersAsTarget", fields: [target_product_id], references: [id], onDelete: Cascade)
+  filter Filter @relation(fields: [filter_id], references: [id], onDelete: Cascade)
+
+  @@id([part_product_id, target_product_id, filter_id])
+  @@index([target_product_id])
+  @@index([filter_id])
+  @@map("sparepart_filters")
 }
 
 model FilterValue {
