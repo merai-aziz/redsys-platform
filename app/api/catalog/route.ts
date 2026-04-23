@@ -44,6 +44,22 @@ type FamilyFilterLinkRow = {
   filter_value: string | null
 }
 
+type SparepartFilterLinkRow = {
+  target_product_id: number
+  filter_id: number
+  filter_name: string
+  filter_value_id: number | null
+  filter_value: string | null
+}
+
+type SparepartDomainFilterRow = {
+  domain_code: string
+  filter_id: number
+  filter_name: string
+  filter_value_id: number | null
+  filter_value: string | null
+}
+
 type Model = {
   id: string
   name: string
@@ -63,6 +79,12 @@ type Model = {
   seriesId: string
   brandId: string
   domainId: string
+  filterValues: Array<{
+    filterId: number
+    filterName: string
+    valueId: number
+    value: string
+  }>
 }
 
 type CompatibilityLink = {
@@ -123,6 +145,37 @@ export async function GET(request: Request) {
     ORDER BY ff.family_id ASC, ff.sort_order ASC, f.name ASC, fv.value ASC
   `
 
+  const sparepartFilterLinksPromise = prisma.$queryRaw<SparepartFilterLinkRow[]>`
+    SELECT
+      sf.target_product_id,
+      sf.filter_id,
+      f.name AS filter_name,
+      fv.id AS filter_value_id,
+      fv.value AS filter_value
+    FROM sparepart_filters sf
+    INNER JOIN catalog_filters f ON f.id = sf.filter_id
+    LEFT JOIN filter_values fv ON fv.filter_id = f.id
+    ORDER BY sf.target_product_id ASC, sf.sort_order ASC, f.name ASC, fv.value ASC
+  `
+
+  const sparepartDomainFilterLinksPromise = prisma.$queryRaw<SparepartDomainFilterRow[]>`
+    SELECT
+      sdf.domain_code,
+      sdf.filter_id,
+      f.name AS filter_name,
+      fv.id AS filter_value_id,
+      fv.value AS filter_value
+    FROM sparepart_domain_filters sdf
+    INNER JOIN catalog_filters f ON f.id = sdf.filter_id
+    LEFT JOIN filter_values fv ON fv.filter_id = f.id
+    ORDER BY sdf.domain_code ASC, sdf.sort_order ASC, f.name ASC, fv.value ASC
+  `.catch((error: unknown) => {
+    if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2021') {
+      return []
+    }
+    throw error
+  })
+
   const compatibilityRowsPromise = prisma.productCompatibility.findMany({
     select: {
       part_product_id: true,
@@ -135,7 +188,7 @@ export async function GET(request: Request) {
     throw error
   })
 
-  const [products, familyFilterLinks, compatibilityRows] = await Promise.all([
+  const [products, familyFilterLinks, sparepartFilterLinks, sparepartDomainFilterLinks, compatibilityRows] = await Promise.all([
     prisma.product.findMany({
       include: {
         brand: true,
@@ -143,10 +196,19 @@ export async function GET(request: Request) {
           include: { category: true },
         },
         specs: true,
+        product_filter_values: {
+          include: {
+            filter_value: {
+              include: { filter: true },
+            },
+          },
+        },
       },
       orderBy: [{ category_id: 'asc' }, { family_id: 'asc' }, { name: 'asc' }],
     }),
     familyFilterLinksPromise,
+    sparepartFilterLinksPromise,
+    sparepartDomainFilterLinksPromise,
     compatibilityRowsPromise,
   ])
 
@@ -236,6 +298,12 @@ export async function GET(request: Request) {
     seriesId: row.seriesIdValue,
     brandId: String(row.product.brand.id),
     domainId: row.domain.id,
+    filterValues: row.product.product_filter_values.map((entry) => ({
+      filterId: entry.filter_value.filter_id,
+      filterName: entry.filter_value.filter.name,
+      valueId: entry.filter_value.id,
+      value: entry.filter_value.value,
+    })),
   }))
 
   const skus: Sku[] = filteredRows.map((row) => ({
@@ -268,6 +336,46 @@ export async function GET(request: Request) {
     })),
   }))
 
+  const sparepartFilterMap = new Map<number, Map<number, { name: string; values: Array<{ id: number; value: string }> }>>()
+  sparepartFilterLinks.forEach((link) => {
+    const filtersForTarget = sparepartFilterMap.get(link.target_product_id) ?? new Map<number, { name: string; values: Array<{ id: number; value: string }> }>()
+    const existing = filtersForTarget.get(link.filter_id) ?? { name: link.filter_name, values: [] }
+    if (link.filter_value_id && link.filter_value) {
+      existing.values.push({ id: link.filter_value_id, value: link.filter_value })
+    }
+    filtersForTarget.set(link.filter_id, existing)
+    sparepartFilterMap.set(link.target_product_id, filtersForTarget)
+  })
+
+  const sparepartFilters = Array.from(sparepartFilterMap.entries()).map(([targetProductId, filtersMap]) => ({
+    targetProductId: String(targetProductId),
+    filters: Array.from(filtersMap.entries()).map(([id, filter]) => ({
+      id,
+      name: filter.name,
+      values: filter.values,
+    })),
+  }))
+
+  const sparepartDomainFilterMap = new Map<string, Map<number, { name: string; values: Array<{ id: number; value: string }> }>>()
+  sparepartDomainFilterLinks.forEach((link) => {
+    const filtersForDomain = sparepartDomainFilterMap.get(link.domain_code) ?? new Map<number, { name: string; values: Array<{ id: number; value: string }> }>()
+    const existing = filtersForDomain.get(link.filter_id) ?? { name: link.filter_name, values: [] }
+    if (link.filter_value_id && link.filter_value) {
+      existing.values.push({ id: link.filter_value_id, value: link.filter_value })
+    }
+    filtersForDomain.set(link.filter_id, existing)
+    sparepartDomainFilterMap.set(link.domain_code, filtersForDomain)
+  })
+
+  const sparepartDomainFilters = Array.from(sparepartDomainFilterMap.entries()).map(([domainCode, filtersMap]) => ({
+    domainCode,
+    filters: Array.from(filtersMap.entries()).map(([id, filter]) => ({
+      id,
+      name: filter.name,
+      values: filter.values,
+    })),
+  }))
+
   const visibleProductIds = new Set(filteredRows.map((row) => row.product.id))
   const compatibilities: CompatibilityLink[] = compatibilityRows
     .filter((row) => visibleProductIds.has(row.part_product_id) && visibleProductIds.has(row.target_product_id))
@@ -276,5 +384,15 @@ export async function GET(request: Request) {
       targetProductId: String(row.target_product_id),
     }))
 
-  return NextResponse.json({ domains, brands, series, models, skus, familyFilters, compatibilities })
+  return NextResponse.json({
+    domains,
+    brands,
+    series,
+    models,
+    skus,
+    familyFilters,
+    compatibilities,
+    sparepartFilters,
+    sparepartDomainFilters,
+  })
 }

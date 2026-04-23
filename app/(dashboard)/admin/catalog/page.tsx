@@ -34,6 +34,17 @@ interface Filter {
   filter_values?: Array<{ id: number; value: string }>
 }
 
+interface SparepartDomainFiltersPayload {
+  domainCode: string
+  filters: Array<{ id: number; name: string }>
+}
+
+const SPAREPART_DOMAINS = [
+  { code: 'SERVER', label: 'Serveur' },
+  { code: 'STORAGE', label: 'Storage' },
+  { code: 'NETWORK', label: 'Reseau' },
+] as const
+
 export default function AdminCatalogPage() {
   const [brands, setBrands] = useState<Brand[]>([])
   const [categories, setCategories] = useState<Category[]>([])
@@ -48,26 +59,43 @@ export default function AdminCatalogPage() {
   const [selectedFamilyForFilters, setSelectedFamilyForFilters] = useState<number | null>(null)
   const [assignedFilterIds, setAssignedFilterIds] = useState<number[]>([])
   const [filterValueDrafts, setFilterValueDrafts] = useState<Record<number, string>>({})
+  const [selectedDomainForFilters, setSelectedDomainForFilters] = useState<(typeof SPAREPART_DOMAINS)[number]['code']>('SERVER')
+  const [domainFilterAssignments, setDomainFilterAssignments] = useState<Record<(typeof SPAREPART_DOMAINS)[number]['code'], number[]>>({
+    SERVER: [],
+    STORAGE: [],
+    NETWORK: [],
+  })
+  const [savingDomainFilters, setSavingDomainFilters] = useState(false)
 
   async function loadAll() {
-    const [brandsRes, categoriesRes, familiesRes, filtersRes] = await Promise.all([
+    const [brandsRes, categoriesRes, familiesRes, filtersRes, domainFiltersRes] = await Promise.all([
       fetch('/api/admin/brands'),
       fetch('/api/admin/categories'),
       fetch('/api/admin/families'),
       fetch('/api/admin/filters'),
+      fetch('/api/admin/sparepart-domain-filters'),
     ])
 
-    const [brandsJson, categoriesJson, familiesJson, filtersJson] = await Promise.all([
+    const [brandsJson, categoriesJson, familiesJson, filtersJson, domainFiltersJson] = await Promise.all([
       brandsRes.json(),
       categoriesRes.json(),
       familiesRes.json(),
       filtersRes.json(),
+      domainFiltersRes.json(),
     ])
 
     setBrands(brandsJson.brands || [])
     setCategories(categoriesJson.categories || [])
     setFamilies(familiesJson.families || [])
     setFilters(filtersJson.filters || [])
+
+    const domainAssignments = (domainFiltersJson.domainFilters || []) as SparepartDomainFiltersPayload[]
+    const nextAssignments = SPAREPART_DOMAINS.reduce<Record<(typeof SPAREPART_DOMAINS)[number]['code'], number[]>>((acc, domain) => {
+      const current = domainAssignments.find((entry) => entry.domainCode === domain.code)
+      acc[domain.code] = current?.filters.map((filter) => filter.id) || []
+      return acc
+    }, { SERVER: [], STORAGE: [], NETWORK: [] })
+    setDomainFilterAssignments(nextAssignments)
   }
 
   const selectedFamilyLabel = useMemo(() => {
@@ -196,6 +224,40 @@ export default function AdminCatalogPage() {
     await loadAll()
   }
 
+  async function saveDomainFilters() {
+    setSavingDomainFilters(true)
+
+    const res = await fetch('/api/admin/sparepart-domain-filters', {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        domainFilters: SPAREPART_DOMAINS.map((domain) => ({
+          domainCode: domain.code,
+          filterIds: domainFilterAssignments[domain.code] ?? [],
+        })),
+      }),
+    })
+
+    setSavingDomainFilters(false)
+
+    if (!res.ok) {
+      const data = await res.json().catch(() => null)
+      toast.error(data?.error || 'Enregistrement des filtres domaine impossible')
+      return
+    }
+
+    toast.success('Filtres domaine enregistres')
+    await loadAll()
+  }
+
+  function toggleDomainFilter(filterId: number, checked: boolean) {
+    setDomainFilterAssignments((previous) => {
+      const current = previous[selectedDomainForFilters] ?? []
+      const next = checked ? Array.from(new Set([...current, filterId])) : current.filter((id) => id !== filterId)
+      return { ...previous, [selectedDomainForFilters]: next }
+    })
+  }
+
   async function removeFilterValue(filterId: number, valueId: number, label: string) {
     if (!confirm(`Supprimer la valeur ${label} ?`)) return
 
@@ -248,6 +310,20 @@ export default function AdminCatalogPage() {
     }
 
     toast.success('Mis a jour')
+    await loadAll()
+  }
+
+  async function removeFilter(filterId: number, label: string) {
+    if (!confirm(`Supprimer le filtre ${label} ?`)) return
+
+    const res = await fetch(`/api/admin/filters/${filterId}`, { method: 'DELETE' })
+    if (!res.ok) {
+      const data = await res.json().catch(() => null)
+      toast.error(data?.error || 'Suppression filtre impossible')
+      return
+    }
+
+    toast.success('Filtre supprime')
     await loadAll()
   }
 
@@ -500,6 +576,54 @@ export default function AdminCatalogPage() {
             </div>
           </CardContent>
         </Card>
+
+        <Card>
+          <CardHeader>
+            <CardTitle>Filtres par domaine</CardTitle>
+            <CardDescription>Assigner les filtres Pieces Detachees visibles dans Parts Finder pour chaque domaine.</CardDescription>
+          </CardHeader>
+          <CardContent className="space-y-3">
+            <div className="space-y-2">
+              <Label>Domaine</Label>
+              <select
+                className="h-10 w-full rounded border border-slate-200 bg-white px-3 text-sm"
+                value={selectedDomainForFilters}
+                onChange={(e) => setSelectedDomainForFilters(e.target.value as (typeof SPAREPART_DOMAINS)[number]['code'])}
+              >
+                {SPAREPART_DOMAINS.map((domain) => (
+                  <option key={domain.code} value={domain.code}>
+                    {domain.label}
+                  </option>
+                ))}
+              </select>
+            </div>
+
+            <div className="space-y-2">
+              {filters.length === 0 ? (
+                <p className="rounded border bg-slate-50 p-3 text-sm text-slate-500">Creer d abord des filtres ci-dessus.</p>
+              ) : (
+                <div className="grid gap-2 rounded border p-3 sm:grid-cols-2 lg:grid-cols-3">
+                  {filters.map((filter) => {
+                    const checked = (domainFilterAssignments[selectedDomainForFilters] ?? []).includes(filter.id)
+                    return (
+                      <label key={filter.id} className="flex items-center gap-2 rounded border px-2 py-2 text-sm">
+                        <input type="checkbox" checked={checked} onChange={(e) => toggleDomainFilter(filter.id, e.target.checked)} />
+                        <span>{filter.name}</span>
+                      </label>
+                    )
+                  })}
+                </div>
+              )}
+            </div>
+
+            <div className="flex justify-end">
+              <Button onClick={saveDomainFilters} disabled={savingDomainFilters}>
+                {savingDomainFilters ? 'Enregistrement...' : 'Enregistrer pour ce domaine'}
+              </Button>
+            </div>
+          </CardContent>
+        </Card>
+
       </div>
 
       <Card>

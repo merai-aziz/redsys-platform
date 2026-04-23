@@ -220,6 +220,7 @@ model Filter {
   filter_values FilterValue[]
   family_filters FamilyFilter[]
   sparepart_filters SparepartFilter[]
+  sparepart_domain_filters SparepartDomainFilter[]
 
   @@map("catalog_filters")
 }
@@ -249,6 +250,17 @@ model SparepartFilter {
   @@index([target_product_id])
   @@index([filter_id])
   @@map("sparepart_filters")
+}
+
+model SparepartDomainFilter {
+  domain_code String
+  filter_id Int
+  sort_order Int @default(0)
+  filter Filter @relation(fields: [filter_id], references: [id], onDelete: Cascade)
+
+  @@id([domain_code, filter_id])
+  @@index([filter_id])
+  @@map("sparepart_domain_filters")
 }
 
 model FilterValue {

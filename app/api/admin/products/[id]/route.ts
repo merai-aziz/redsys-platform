@@ -31,6 +31,10 @@ export async function PUT(request: Request, context: Params) {
     poe?: boolean
     filter_value_ids?: number[]
     compatible_product_ids?: number[]
+    sparepart_filters?: Array<{
+      target_product_id?: number
+      filter_ids?: number[]
+    }>
     specs?: Array<{ key?: string; value?: string }>
   }
 
@@ -65,6 +69,16 @@ export async function PUT(request: Request, context: Params) {
   const compatibleProductIds = Array.isArray(body.compatible_product_ids)
     ? body.compatible_product_ids.filter((value): value is number => Number.isInteger(value))
     : []
+  const sparepartFilters = Array.isArray(body.sparepart_filters)
+    ? body.sparepart_filters
+      .map((entry) => ({
+        targetProductId: Number(entry.target_product_id),
+        filterIds: Array.isArray(entry.filter_ids)
+          ? entry.filter_ids.filter((value): value is number => Number.isInteger(value))
+          : [],
+      }))
+      .filter((entry) => Number.isInteger(entry.targetProductId) && entry.filterIds.length > 0)
+    : []
 
   const specs = Array.isArray(body.specs)
     ? body.specs
@@ -77,26 +91,29 @@ export async function PUT(request: Request, context: Params) {
 
   const normalizedStock = inStock ? Math.max(1, Math.trunc(stockQty)) : 0
 
-  const product = await prisma.$transaction(async (tx) => {
-    await tx.product.update({
-      where: { id: productId },
-      data: {
-        name,
-        base_price: basePrice,
-        type,
-        image_url: imageUrl,
-        description,
-        stock_qty: normalizedStock,
-        in_stock: normalizedStock > 0,
-        poe,
-        brand_id: brandId,
-        family_id: familyId,
-        category_id: categoryId,
-      },
-    })
+  let product
+  try {
+    product = await prisma.$transaction(async (tx) => {
+      await tx.product.update({
+        where: { id: productId },
+        data: {
+          name,
+          base_price: basePrice,
+          type,
+          image_url: imageUrl,
+          description,
+          stock_qty: normalizedStock,
+          in_stock: normalizedStock > 0,
+          poe,
+          brand_id: brandId,
+          family_id: familyId,
+          category_id: categoryId,
+        },
+      })
 
     await tx.productFilterValue.deleteMany({ where: { product_id: productId } })
     await tx.productSpec.deleteMany({ where: { product_id: productId } })
+    await tx.sparepartFilter.deleteMany({ where: { part_product_id: productId } })
 
     if (type === 'CONFIGURABLE' && filterValueIds.length > 0) {
       await tx.productFilterValue.createMany({
@@ -117,10 +134,19 @@ export async function PUT(request: Request, context: Params) {
       })
     }
 
-    return tx.product.findUnique({
-      where: { id: productId },
+      return tx.product.findUnique({
+        where: { id: productId },
+      })
     })
-  })
+  } catch (error) {
+    if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2002') {
+      return NextResponse.json(
+        { error: 'Un produit avec le meme nom existe deja pour cette marque et cette famille.' },
+        { status: 409 },
+      )
+    }
+    throw error
+  }
 
   try {
     await prisma.productCompatibility.deleteMany({ where: { part_product_id: productId } })
@@ -133,6 +159,20 @@ export async function PUT(request: Request, context: Params) {
             part_product_id: productId,
             target_product_id: targetProductId,
           })),
+        skipDuplicates: true,
+      })
+    }
+
+    if (type === 'STANDARD' && sparepartFilters.length > 0) {
+      await prisma.sparepartFilter.createMany({
+        data: sparepartFilters.flatMap((entry) =>
+          entry.filterIds.map((filterId, sortOrder) => ({
+            part_product_id: productId,
+            target_product_id: entry.targetProductId,
+            filter_id: filterId,
+            sort_order: sortOrder,
+          })),
+        ),
         skipDuplicates: true,
       })
     }

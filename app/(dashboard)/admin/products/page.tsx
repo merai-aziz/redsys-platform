@@ -14,6 +14,16 @@ interface Brand { id: number; name: string }
 interface Category { id: number; name: string }
 interface Family { id: number; name: string; category_id: number }
 
+interface Filter {
+  id: number
+  name: string
+}
+
+interface SparepartDomainFilterDefinition {
+  domainCode: string
+  filters: Array<{ id: number; name: string }>
+}
+
 interface Product {
   id: number
   name: string
@@ -36,6 +46,10 @@ interface Product {
   compatibilities_as_part?: Array<{
     target_product_id: number
   }>
+  sparepart_filters_as_part?: Array<{
+    target_product_id: number
+    filter_id: number
+  }>
 }
 
 const emptyForm = {
@@ -52,11 +66,18 @@ const emptyForm = {
   family_id: '',
 }
 
+const SPAREPART_DOMAIN_OPTIONS = [
+  { code: 'SERVER', label: 'Serveur' },
+  { code: 'STORAGE', label: 'Storage' },
+  { code: 'NETWORK', label: 'Reseau' },
+] as const
+
 export default function AdminProductsPage() {
   const [products, setProducts] = useState<Product[]>([])
   const [brands, setBrands] = useState<Brand[]>([])
   const [categories, setCategories] = useState<Category[]>([])
   const [families, setFamilies] = useState<Family[]>([])
+  const [filters, setFilters] = useState<Filter[]>([])
 
   const [form, setForm] = useState(emptyForm)
   const [specRows, setSpecRows] = useState<Array<{ key: string; value: string }>>([{ key: '', value: '' }])
@@ -64,6 +85,8 @@ export default function AdminProductsPage() {
   const [showDialog, setShowDialog] = useState(false)
   const [compatibleModelIds, setCompatibleModelIds] = useState<number[]>([])
   const [compatibleSearch, setCompatibleSearch] = useState('')
+  const [sparepartTargetId, setSparepartTargetId] = useState<number | null>(null)
+  const [sparepartFilterAssignments, setSparepartFilterAssignments] = useState<Record<number, number[]>>({})
 
   const [optionDialogProduct, setOptionDialogProduct] = useState<Product | null>(null)
   const [optionName, setOptionName] = useState('')
@@ -81,18 +104,20 @@ export default function AdminProductsPage() {
       }
     }
 
-    const [productsRes, brandsRes, categoriesRes, familiesRes] = await Promise.all([
+    const [productsRes, brandsRes, categoriesRes, familiesRes, filtersRes] = await Promise.all([
       fetch('/api/admin/products'),
       fetch('/api/admin/brands'),
       fetch('/api/admin/categories'),
       fetch('/api/admin/families'),
+      fetch('/api/admin/filters'),
     ])
 
-    const [productsJson, brandsJson, categoriesJson, familiesJson] = await Promise.all([
+    const [productsJson, brandsJson, categoriesJson, familiesJson, filtersJson] = await Promise.all([
       safeJson(productsRes),
       safeJson(brandsRes),
       safeJson(categoriesRes),
       safeJson(familiesRes),
+      safeJson(filtersRes),
     ])
 
     if (!productsRes.ok || !brandsRes.ok || !categoriesRes.ok || !familiesRes.ok) {
@@ -101,6 +126,7 @@ export default function AdminProductsPage() {
         (brandsJson as { error?: string } | null)?.error,
         (categoriesJson as { error?: string } | null)?.error,
         (familiesJson as { error?: string } | null)?.error,
+        (filtersJson as { error?: string } | null)?.error,
       ].find(Boolean)
 
       toast.error(errorMessage || 'Chargement des donnees impossible')
@@ -111,6 +137,7 @@ export default function AdminProductsPage() {
     setBrands((brandsJson as { brands?: Brand[] } | null)?.brands || [])
     setCategories((categoriesJson as { categories?: Category[] } | null)?.categories || [])
     setFamilies((familiesJson as { families?: Family[] } | null)?.families || [])
+    setFilters((filtersJson as { filters?: Filter[] } | null)?.filters || [])
   }
 
   useEffect(() => {
@@ -149,6 +176,12 @@ export default function AdminProductsPage() {
     return normalized.includes('piece') || normalized.includes('detache')
   }, [selectedFamilyRecord])
 
+  useEffect(() => {
+    if (sparepartTargetId && !compatibleModelIds.includes(sparepartTargetId)) {
+      setSparepartTargetId(compatibleModelIds[0] ?? null)
+    }
+  }, [compatibleModelIds, sparepartTargetId])
+
   const compatibleModelChoices = useMemo(() => {
     const q = compatibleSearch.trim().toLowerCase()
     return products
@@ -168,6 +201,8 @@ export default function AdminProductsPage() {
     setSpecRows([{ key: '', value: '' }])
     setCompatibleModelIds([])
     setCompatibleSearch('')
+    setSparepartTargetId(null)
+    setSparepartFilterAssignments({})
     setShowDialog(true)
   }
 
@@ -198,6 +233,16 @@ export default function AdminProductsPage() {
     setCompatibleModelIds(preloadedIds)
     setCompatibleSearch('')
 
+    const assignments = Array.isArray(product.sparepart_filters_as_part)
+      ? product.sparepart_filters_as_part.reduce<Record<number, number[]>>((acc, entry) => {
+        const current = acc[entry.target_product_id] ?? []
+        acc[entry.target_product_id] = Array.from(new Set([...current, entry.filter_id]))
+        return acc
+      }, {})
+      : {}
+    setSparepartFilterAssignments(assignments)
+    setSparepartTargetId(preloadedIds[0] ?? (Object.keys(assignments)[0] ? Number(Object.keys(assignments)[0]) : null))
+
     const compatRes = await fetch(`/api/admin/products/${product.id}/compatibilities`)
     if (compatRes.ok) {
       const compatJson = await compatRes.json().catch(() => null)
@@ -205,6 +250,7 @@ export default function AdminProductsPage() {
         ? compatJson.compatibleProductIds.filter((value: unknown): value is number => Number.isInteger(value))
         : []
       setCompatibleModelIds(ids)
+      setSparepartTargetId((current) => (current && ids.includes(current) ? current : ids[0] ?? null))
     }
 
     setShowDialog(true)
@@ -220,6 +266,12 @@ export default function AdminProductsPage() {
       family_id: Number(form.family_id),
       specs: form.type === 'STANDARD' ? specRows.filter((entry) => entry.key.trim() && entry.value.trim()) : [],
       compatible_product_ids: form.type === 'STANDARD' && isSparePartSelection ? compatibleModelIds : [],
+      sparepart_filters: form.type === 'STANDARD' && isSparePartSelection
+        ? Object.entries(sparepartFilterAssignments).map(([targetProductId, filterIds]) => ({
+            target_product_id: Number(targetProductId),
+            filter_ids: filterIds,
+          }))
+        : [],
     }
 
     const url = editingId ? `/api/admin/products/${editingId}` : '/api/admin/products'
@@ -598,6 +650,68 @@ export default function AdminProductsPage() {
                       )
                     })}
                   </div>
+                </div>
+              </div>
+            )}
+
+            {form.type === 'STANDARD' && isSparePartSelection && (
+              <div className="space-y-2 sm:col-span-2">
+                <Label>Filtres de piece detachee</Label>
+                <div className="space-y-3 rounded border p-3">
+                  {compatibleModelIds.length === 0 ? (
+                    <p className="text-sm text-slate-500">Selectionne d'abord au moins un modele compatible.</p>
+                  ) : (
+                    <>
+                      <select
+                        value={sparepartTargetId ?? ''}
+                        onChange={(e) => setSparepartTargetId(Number(e.target.value) || null)}
+                        className="w-full rounded border px-3 py-2 text-sm"
+                      >
+                        <option value="">Selectionner un modele cible</option>
+                        {compatibleModelChoices
+                          .filter((product) => compatibleModelIds.includes(product.id))
+                          .map((product) => (
+                            <option key={product.id} value={product.id}>
+                              {product.name} - {product.brand.name} / {product.family.name}
+                            </option>
+                          ))}
+                      </select>
+
+                      {sparepartTargetId ? (
+                        <div className="space-y-2">
+                          {filters.length === 0 ? (
+                            <p className="text-sm text-slate-500">Aucun filtre configure dans le catalogue.</p>
+                          ) : (
+                            filters.map((filter) => {
+                              const checked = (sparepartFilterAssignments[sparepartTargetId] ?? []).includes(filter.id)
+                              return (
+                                <label key={filter.id} className={`flex cursor-pointer items-center justify-between rounded border px-3 py-2 text-sm ${checked ? 'border-[#2ad1a4] bg-[#f0fdf9]' : 'bg-white'}`}>
+                                  <span className="flex items-center gap-2">
+                                    <input
+                                      type="checkbox"
+                                      checked={checked}
+                                      onChange={(event) => {
+                                        setSparepartFilterAssignments((previous) => {
+                                          const current = previous[sparepartTargetId] ?? []
+                                          const next = event.target.checked
+                                            ? Array.from(new Set([...current, filter.id]))
+                                            : current.filter((value) => value !== filter.id)
+                                          return { ...previous, [sparepartTargetId]: next }
+                                        })
+                                      }}
+                                    />
+                                    {filter.name}
+                                  </span>
+                                </label>
+                              )
+                            })
+                          )}
+                        </div>
+                      ) : (
+                        <p className="text-sm text-slate-500">Choisis un modele cible pour definir ses filtres.</p>
+                      )}
+                    </>
+                  )}
                 </div>
               </div>
             )}

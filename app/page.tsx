@@ -61,9 +61,23 @@ interface Model {
   seriesId: string
   brandId: string
   domainId: string
+  filterValues?: Array<{
+    filterId: number
+    filterName: string
+    valueId: number
+    value: string
+  }>
 }
 interface SKU { id: string; sku: string; modelId: string; price: number; stock: number; condition: string }
 interface CompatibilityLink { partProductId: string; targetProductId: string }
+interface SparepartFilterDefinition {
+  targetProductId: string
+  filters: Array<{ id: number; name: string; values?: Array<{ id: number; value: string }> }>
+}
+interface SparepartDomainFilterDefinition {
+  domainCode: string
+  filters: Array<{ id: number; name: string; values?: Array<{ id: number; value: string }> }>
+}
 interface FamilyFilterDefinition {
   familyId: string
   filters: Array<{
@@ -79,6 +93,8 @@ interface CatalogPayload {
   skus: SKU[]
   familyFilters: FamilyFilterDefinition[]
   compatibilities: CompatibilityLink[]
+  sparepartFilters: SparepartFilterDefinition[]
+  sparepartDomainFilters: SparepartDomainFilterDefinition[]
 }
 
 interface StandardSpecFilterGroup {
@@ -198,6 +214,8 @@ function safePayload(payload: unknown): CatalogPayload {
     skus: Array.isArray(p?.skus) ? p.skus : [],
     familyFilters: Array.isArray(p?.familyFilters) ? p.familyFilters : [],
     compatibilities: Array.isArray(p?.compatibilities) ? p.compatibilities : [],
+    sparepartFilters: Array.isArray(p?.sparepartFilters) ? p.sparepartFilters : [],
+    sparepartDomainFilters: Array.isArray(p?.sparepartDomainFilters) ? p.sparepartDomainFilters : [],
   }
 }
 
@@ -559,6 +577,8 @@ export default function Home() {
     skus: [],
     familyFilters: [],
     compatibilities: [],
+    sparepartFilters: [],
+    sparepartDomainFilters: [],
   })
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
@@ -575,6 +595,7 @@ export default function Home() {
   const [partsBrandId, setPartsBrandId] = useState<string | null>(null)
   const [partsModelId, setPartsModelId] = useState<string | null>(null)
   const [partsStockFilter, setPartsStockFilter] = useState<'all' | 'in' | 'out'>('all')
+  const [partsSelectedFilters, setPartsSelectedFilters] = useState<Record<string, string[]>>({})
 
   const [menuOpen, setMenuOpen] = useState(false)
   const [activeMenu, setActiveMenu] = useState<MenuKind | null>(null)
@@ -660,8 +681,17 @@ export default function Home() {
         const haystack = `${model.name} ${model.brandName ?? ''} ${model.familyName ?? ''} ${model.categoryName ?? ''} ${model.reference}`.toLowerCase()
         return haystack.includes(q)
       })
+      .filter((model) => {
+        return Object.entries(partsSelectedFilters).every(([filterName, values]) => {
+          if (values.length === 0) return true
+          const modelValues = (model.specs ?? [])
+            .filter((entry) => normalizeText(entry.key) === normalizeText(filterName))
+            .map((entry) => entry.value)
+          return values.some((value) => modelValues.includes(value))
+        })
+      })
       .sort((a, b) => a.name.localeCompare(b.name))
-  }, [catalog.models, partIdsByTargetModel, partsModelId, partsStockFilter, query])
+  }, [catalog.models, partIdsByTargetModel, partsModelId, partsSelectedFilters, partsStockFilter, query])
 
   const selectedPartsBrand = useMemo(
     () => partsBrandOptions.find((entry) => entry.brandId === partsBrandId) ?? null,
@@ -672,6 +702,69 @@ export default function Home() {
     () => partsModelOptions.find((entry) => entry.id === partsModelId) ?? null,
     [partsModelId, partsModelOptions],
   )
+
+  const partsFilterDefinitions = useMemo(() => {
+    if (!partsModelId) return []
+
+    const explicitTargetFilters = catalog.sparepartFilters.find((entry) => entry.targetProductId === partsModelId)?.filters ?? []
+    if (explicitTargetFilters.length > 0) return explicitTargetFilters
+
+    const selectedModelDomainId = catalog.models.find((entry) => entry.id === partsModelId)?.domainId
+    if (!selectedModelDomainId) return []
+
+    const selectedModelDomainCode = catalog.domains.find((entry) => entry.id === selectedModelDomainId)?.code
+    if (!selectedModelDomainCode) return []
+
+    return catalog.sparepartDomainFilters.find((entry) => normalizeText(entry.domainCode) === normalizeText(selectedModelDomainCode))?.filters ?? []
+  }, [catalog.domains, catalog.models, catalog.sparepartDomainFilters, catalog.sparepartFilters, partsModelId])
+
+  const partsFilterGroups = useMemo(() => {
+    const groups = new Map<string, Map<string, number>>()
+
+    partsFilterDefinitions.forEach((filterDefinition) => {
+      const key = normalizeText(filterDefinition.name)
+      const values = new Map<string, number>()
+
+      const sourceValues = filterDefinition.values && filterDefinition.values.length > 0
+        ? filterDefinition.values.map((entry) => entry.value).filter(Boolean)
+        : Array.from(
+            new Set(
+              compatiblePartModels.flatMap((model) =>
+                (model.specs ?? [])
+                  .filter((spec) => normalizeText(spec.key) === key)
+                  .map((spec) => spec.value)
+                  .filter(Boolean),
+              ),
+            ),
+          )
+
+      sourceValues.forEach((value) => {
+        const count = compatiblePartModels.filter((model) =>
+          (model.specs ?? []).some(
+            (spec) => normalizeText(spec.key) === key && normalizeText(spec.value) === normalizeText(value),
+          ),
+        ).length
+        values.set(value, count)
+      })
+
+      groups.set(filterDefinition.name, values)
+    })
+
+    return Array.from(groups.entries()).map(([key, values]) => ({
+      key,
+      options: Array.from(values.entries())
+        .map(([value, count]) => ({ value, count }))
+        .sort((a, b) => a.value.localeCompare(b.value, 'fr', { numeric: true, sensitivity: 'base' })),
+    }))
+  }, [compatiblePartModels, partsFilterDefinitions])
+
+  function togglePartsFilter(filterName: string, value: string, checked: boolean) {
+    setPartsSelectedFilters((previous) => {
+      const current = previous[filterName] ?? []
+      const next = checked ? Array.from(new Set([...current, value])) : current.filter((entry) => entry !== value)
+      return { ...previous, [filterName]: next }
+    })
+  }
 
   const getServerFamilyLabel = (s: Series) => {
     const raw = `${s.name} ${s.description ?? ''}`.toLowerCase()
@@ -1517,7 +1610,11 @@ export default function Home() {
                     return (
                       <button
                         key={item.brandId}
-                        onClick={() => setPartsBrandId(item.brandId)}
+                        onClick={() => {
+                          setPartsBrandId(item.brandId)
+                          setPartsModelId(null)
+                          setPartsSelectedFilters({})
+                        }}
                         className="group relative overflow-hidden rounded-2xl border-2 border-slate-200 bg-white shadow-sm transition-all duration-300 hover:-translate-y-1 hover:border-slate-300 hover:shadow-xl"
                       >
                         <div className={`absolute inset-0 bg-gradient-to-br ${colors.primary} opacity-0 transition-opacity duration-300 group-hover:opacity-5`} />
@@ -1617,7 +1714,10 @@ export default function Home() {
                     return (
                       <button
                         key={model.id}
-                        onClick={() => setPartsModelId(model.id)}
+                          onClick={() => {
+                            setPartsModelId(model.id)
+                            setPartsSelectedFilters({})
+                          }}
                         className="group relative overflow-hidden rounded-2xl border-2 border-slate-200 bg-white shadow-sm transition-all duration-300 hover:-translate-y-1 hover:border-slate-300 hover:shadow-xl"
                       >
                         <div className={`absolute inset-0 bg-gradient-to-br ${brandColors.primary} opacity-0 transition-opacity duration-300 group-hover:opacity-5`} />
@@ -1693,103 +1793,182 @@ export default function Home() {
                   </div>
                 </div>
 
-                <div className="space-y-4 rounded-2xl border-2 border-slate-200 bg-white p-6 sm:flex sm:items-center sm:justify-between sm:space-y-0">
-                  <div>
-                    <h2 className="text-2xl font-bold text-slate-900 sm:text-3xl">
-                      Pièces compatibles
-                    </h2>
-                    <p className="mt-2 text-sm text-slate-500">
-                      {selectedPartsBrand?.name} • {selectedPartsModel?.name}
-                    </p>
-                  </div>
-
-                  <div className="flex flex-col items-stretch gap-3 sm:flex-row sm:items-center">
-                    <button
-                      onClick={() => setPartsModelId(null)}
-                      className="order-2 inline-flex items-center justify-center gap-2 rounded-xl px-4 py-2 font-semibold text-slate-600 transition-colors hover:bg-slate-100 sm:order-1 sm:justify-start"
-                    >
-                      <ArrowLeft className="h-4 w-4" />
-                      <span className="hidden sm:inline">Changer</span>
-                    </button>
-
-                    <select
-                      value={partsStockFilter}
-                      onChange={(event) => setPartsStockFilter(event.target.value as 'all' | 'in' | 'out')}
-                      className="order-1 rounded-xl border-2 border-slate-200 bg-white px-4 py-2.5 font-semibold text-slate-900 outline-none transition hover:border-slate-300 focus:border-teal-500 sm:order-2"
-                    >
-                      <option value="all">Tous les stocks</option>
-                      <option value="in">En stock</option>
-                      <option value="out">En rupture</option>
-                    </select>
-                  </div>
-                </div>
-
-                {compatiblePartModels.length === 0 ? (
-                  <div className="rounded-2xl border-2 border-slate-200 bg-slate-50 p-12 text-center">
-                    <p className="text-lg font-semibold text-slate-900">Aucune pièce compatible trouvée</p>
-                    <p className="mt-2 text-sm text-slate-500">Essayez de modifier votre sélection</p>
-                  </div>
-                ) : (
-                  <div className="grid gap-4 sm:grid-cols-2 sm:gap-6 lg:grid-cols-3 xl:grid-cols-4">
-                    {compatiblePartModels.map((model) => {
-                      const inStock = (model.stockQty ?? 0) > 0
-                      const brandColors = getBrandColors(selectedPartsBrand?.name || '')
-
-                      return (
-                        <article
-                          key={model.id}
-                          className="group relative overflow-hidden rounded-2xl border-2 border-slate-200 bg-white shadow-sm transition-all duration-300 hover:-translate-y-1 hover:border-slate-300 hover:shadow-xl"
+                <div className="grid gap-6 lg:grid-cols-[280px_minmax(0,1fr)]">
+                  <aside className="space-y-4 lg:sticky lg:top-24 lg:self-start">
+                    <div className="rounded-2xl border border-[#d0d9e3] bg-white p-4 shadow-sm">
+                      <div className="mb-3 flex items-center justify-between gap-3">
+                        <h3 className="text-base font-bold text-[#1a3a52]">Filtres</h3>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setPartsSelectedFilters({})
+                            setPartsStockFilter('all')
+                          }}
+                          className="text-sm text-[#7a8fa3] transition hover:text-[#1a3a52]"
                         >
-                          <div className={`absolute inset-0 bg-gradient-to-br ${brandColors.primary} opacity-0 transition-opacity duration-300 group-hover:opacity-5`} />
+                          Réinitialiser
+                        </button>
+                      </div>
 
-                          <div className="relative flex h-full flex-col space-y-3 p-5">
-                            <div className={`${brandColors.light} flex aspect-video items-center justify-center rounded-xl p-4 transition-transform duration-300 group-hover:scale-105`}>
-                              <div className="text-3xl font-black text-slate-600 opacity-30">
-                                {model.name.charAt(0)}
+                      <div className="space-y-4">
+                        <div className="rounded-xl bg-[#f8fafc] p-3">
+                          <p className="mb-2 text-xs font-bold uppercase tracking-widest text-[#7a8fa3]">Stock</p>
+                          <div className="space-y-2">
+                            {[
+                              { value: 'all', label: 'Tous les stocks' },
+                              { value: 'in', label: 'En stock' },
+                              { value: 'out', label: 'En rupture' },
+                            ].map((item) => {
+                              const active = partsStockFilter === item.value
+                              return (
+                                <label
+                                  key={item.value}
+                                  className={`flex cursor-pointer items-center justify-between rounded-lg border px-3 py-2 text-sm transition ${active ? 'border-[#2ad1a4] bg-[#f0fdf9] text-[#1a3a52] ring-1 ring-[#2ad1a4]' : 'border-[#d0d9e3] bg-white text-[#334e68] hover:border-[#a5b8cc] hover:bg-[#f9fbfc]'}`}
+                                >
+                                  <span className="flex items-center gap-2">
+                                    <input
+                                      type="radio"
+                                      name="parts-stock-filter"
+                                      checked={active}
+                                      onChange={() => setPartsStockFilter(item.value as 'all' | 'in' | 'out')}
+                                      className="h-4 w-4 accent-[#2ad1a4]"
+                                    />
+                                    {item.label}
+                                  </span>
+                                </label>
+                              )
+                            })}
+                          </div>
+                        </div>
+
+                        {partsFilterGroups.length === 0 ? (
+                          <p className="rounded-xl bg-[#f8fafc] p-3 text-sm text-[#5a7a9a]">Aucun filtre disponible pour ces pièces.</p>
+                        ) : (
+                          partsFilterGroups.map((group) => (
+                            <div key={group.key} className="rounded-xl bg-[#f8fafc] p-3">
+                              <p className="mb-2 text-xs font-bold uppercase tracking-widest text-[#7a8fa3]">{group.key}</p>
+                              <div className="space-y-2">
+                                {group.options.map((option) => {
+                                  const checked = (partsSelectedFilters[group.key] ?? []).includes(option.value)
+                                  return (
+                                    <label
+                                      key={`${group.key}-${option.value}`}
+                                      className={`flex cursor-pointer items-center justify-between rounded-lg border px-3 py-2 text-sm transition ${checked ? 'border-[#2ad1a4] bg-[#f0fdf9] text-[#1a3a52] ring-1 ring-[#2ad1a4]' : 'border-[#d0d9e3] bg-white text-[#334e68] hover:border-[#a5b8cc] hover:bg-[#f9fbfc]'}`}
+                                    >
+                                      <span className="flex items-center gap-2">
+                                        <input
+                                          type="checkbox"
+                                          checked={checked}
+                                          onChange={(event) => togglePartsFilter(group.key, option.value, event.target.checked)}
+                                          className="h-4 w-4 accent-[#2ad1a4]"
+                                        />
+                                        {option.value}
+                                      </span>
+                                      <span className="text-xs text-[#7a8fa3]">({option.count})</span>
+                                    </label>
+                                  )
+                                })}
                               </div>
                             </div>
+                          ))
+                        )}
+                      </div>
+                    </div>
+                  </aside>
 
-                            <div className="flex-1 space-y-2">
-                              <h4 className="line-clamp-2 text-sm font-bold text-slate-900 transition-colors group-hover:text-slate-950">
-                                {model.name}
-                              </h4>
-                              <p className="text-xs text-slate-500">
-                                {model.brandName} • {model.familyName}
-                              </p>
-                            </div>
+                  <div className="space-y-4">
+                    <div className="space-y-4 rounded-2xl border-2 border-slate-200 bg-white p-6 sm:flex sm:items-center sm:justify-between sm:space-y-0">
+                      <div>
+                        <h2 className="text-2xl font-bold text-slate-900 sm:text-3xl">
+                          Pièces compatibles
+                        </h2>
+                        <p className="mt-2 text-sm text-slate-500">
+                          {selectedPartsBrand?.name} • {selectedPartsModel?.name}
+                        </p>
+                      </div>
 
-                            <div className="flex items-center justify-between border-t border-slate-200 pt-3">
-                              <span
-                                className={`text-xs font-bold uppercase tracking-wide ${
-                                  inStock ? 'text-emerald-600' : 'text-amber-600'
-                                }`}
-                              >
-                                {inStock ? '✓ Stock' : '✕ Rupture'}
-                              </span>
-                            </div>
+                      <div className="flex flex-col items-stretch gap-3 sm:flex-row sm:items-center">
+                        <button
+                          onClick={() => {
+                            setPartsModelId(null)
+                            setPartsSelectedFilters({})
+                          }}
+                          className="order-2 inline-flex items-center justify-center gap-2 rounded-xl px-4 py-2 font-semibold text-slate-600 transition-colors hover:bg-slate-100 sm:order-1 sm:justify-start"
+                        >
+                          <ArrowLeft className="h-4 w-4" />
+                          <span className="hidden sm:inline">Changer</span>
+                        </button>
+                      </div>
+                    </div>
 
-                            <div className="flex items-center justify-between pt-1">
-                              <p className={`bg-gradient-to-br ${brandColors.primary} bg-clip-text text-lg font-black text-transparent`}>
-                                {model.basePrice.toLocaleString('fr-FR', {
-                                  style: 'currency',
-                                  currency: 'EUR',
-                                })}
-                              </p>
-                              <button
-                                type="button"
-                                onClick={() => openModelConfigurator(model.id)}
-                                className="inline-flex items-center justify-center rounded-full bg-[#2ad1a4] p-2 text-white transition hover:bg-[#20b890]"
-                                title="Ajouter au panier"
-                              >
-                                <ShoppingCart className="h-5 w-5" />
-                              </button>
-                            </div>
-                          </div>
-                        </article>
-                      )
-                    })}
+                    {compatiblePartModels.length === 0 ? (
+                      <div className="rounded-2xl border-2 border-slate-200 bg-slate-50 p-12 text-center">
+                        <p className="text-lg font-semibold text-slate-900">Aucune pièce compatible trouvée</p>
+                        <p className="mt-2 text-sm text-slate-500">Essayez de modifier votre sélection</p>
+                      </div>
+                    ) : (
+                      <div className="grid gap-4 sm:grid-cols-2 sm:gap-6 lg:grid-cols-3 xl:grid-cols-4">
+                        {compatiblePartModels.map((model) => {
+                          const inStock = (model.stockQty ?? 0) > 0
+                          const brandColors = getBrandColors(selectedPartsBrand?.name || '')
+
+                          return (
+                            <article
+                              key={model.id}
+                              className="group relative overflow-hidden rounded-2xl border-2 border-slate-200 bg-white shadow-sm transition-all duration-300 hover:-translate-y-1 hover:border-slate-300 hover:shadow-xl"
+                            >
+                              <div className={`absolute inset-0 bg-gradient-to-br ${brandColors.primary} opacity-0 transition-opacity duration-300 group-hover:opacity-5`} />
+
+                              <div className="relative flex h-full flex-col space-y-3 p-5">
+                                <div className={`${brandColors.light} flex aspect-video items-center justify-center rounded-xl p-4 transition-transform duration-300 group-hover:scale-105`}>
+                                  <div className="text-3xl font-black text-slate-600 opacity-30">
+                                    {model.name.charAt(0)}
+                                  </div>
+                                </div>
+
+                                <div className="flex-1 space-y-2">
+                                  <h4 className="line-clamp-2 text-sm font-bold text-slate-900 transition-colors group-hover:text-slate-950">
+                                    {model.name}
+                                  </h4>
+                                  <p className="text-xs text-slate-500">
+                                    {model.brandName} • {model.familyName}
+                                  </p>
+                                </div>
+
+                                <div className="flex items-center justify-between border-t border-slate-200 pt-3">
+                                  <span
+                                    className={`text-xs font-bold uppercase tracking-wide ${
+                                      inStock ? 'text-emerald-600' : 'text-amber-600'
+                                    }`}
+                                  >
+                                    {inStock ? '✓ Stock' : '✕ Rupture'}
+                                  </span>
+                                </div>
+
+                                <div className="flex items-center justify-between pt-1">
+                                  <p className={`bg-gradient-to-br ${brandColors.primary} bg-clip-text text-lg font-black text-transparent`}>
+                                    {model.basePrice.toLocaleString('fr-FR', {
+                                      style: 'currency',
+                                      currency: 'EUR',
+                                    })}
+                                  </p>
+                                  <button
+                                    type="button"
+                                    onClick={() => openModelConfigurator(model.id)}
+                                    className="inline-flex items-center justify-center rounded-full bg-[#2ad1a4] p-2 text-white transition hover:bg-[#20b890]"
+                                    title="Ajouter au panier"
+                                  >
+                                    <ShoppingCart className="h-5 w-5" />
+                                  </button>
+                                </div>
+                              </div>
+                            </article>
+                          )
+                        })}
+                      </div>
+                    )}
                   </div>
-                )}
+                </div>
               </>
             )}
           </div>
@@ -2179,9 +2358,10 @@ export default function Home() {
                             <p className="text-lg font-black text-[#1a3a52]">{model.basePrice.toLocaleString('fr-FR', { style: 'currency', currency: 'EUR' })}</p>
                             <button
                               type="button"
+                              disabled={!isInStock}
                               onClick={() => openModelConfigurator(model.id)}
-                              className="inline-flex items-center justify-center rounded-full bg-[#2ad1a4] p-2 text-white transition hover:bg-[#20b890]"
-                              title={isConfiguratorDomain ? 'Configurer le modèle' : 'Ajouter au panier'}
+                              className={`inline-flex items-center justify-center rounded-full p-2 text-white transition ${isInStock ? 'bg-[#2ad1a4] hover:bg-[#20b890]' : 'cursor-not-allowed bg-slate-300 text-slate-500'}`}
+                              title={isInStock ? (isConfiguratorDomain ? 'Configurer le modèle' : 'Ajouter au panier') : 'Rupture de stock'}
                             >
                               {isConfiguratorDomain ? (
                                 <Sliders className="h-5 w-5" />
@@ -2285,9 +2465,10 @@ export default function Home() {
                         <p className="text-lg font-black text-[#1a3a52]">{model.basePrice.toLocaleString('fr-FR', { style: 'currency', currency: 'EUR' })}</p>
                         <button
                           type="button"
+                              disabled={!isInStock}
                           onClick={() => openModelConfigurator(model.id)}
-                          className="inline-flex items-center justify-center rounded-full bg-[#2ad1a4] p-2 text-white transition hover:bg-[#20b890]"
-                          title="Ajouter au panier"
+                              className={`inline-flex items-center justify-center rounded-full p-2 text-white transition ${isInStock ? 'bg-[#2ad1a4] hover:bg-[#20b890]' : 'cursor-not-allowed bg-slate-300 text-slate-500'}`}
+                              title={isInStock ? 'Ajouter au panier' : 'Rupture de stock'}
                         >
                           <ShoppingCart className="h-5 w-5" />
                         </button>
