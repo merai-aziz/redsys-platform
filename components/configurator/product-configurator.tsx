@@ -1,8 +1,9 @@
 'use client'
 
-import { useMemo, useState } from 'react'
+import { useState } from 'react'
 import Image from 'next/image'
 import { ShoppingCart, ChevronDown, Check, X, Star } from 'lucide-react'
+import { useCart } from '@/context/CartContext'
 
 interface ConfigValue {
   id: number
@@ -18,7 +19,9 @@ interface ConfigOption {
 }
 
 interface ProductConfiguratorProps {
+  modelId: string
   productName: string
+  brandName: string
   productDescription: string
   fullDescription: string
   basePrice: string
@@ -30,7 +33,9 @@ interface ProductConfiguratorProps {
 }
 
 export function ProductConfigurator({
+  modelId,
   productName,
+  brandName,
   productDescription,
   fullDescription,
   basePrice,
@@ -40,6 +45,7 @@ export function ProductConfigurator({
   poe,
   options,
 }: ProductConfiguratorProps) {
+  const { addItem } = useCart()
   const [showDescription, setShowDescription] = useState(false)
   const [openSections, setOpenSections] = useState<Record<number, boolean>>(
     Object.fromEntries(options.map((opt) => [opt.id, true]))
@@ -87,6 +93,26 @@ export function ProductConfigurator({
   const summaryItems = options
     .map((opt) => ({ opt, val: selectedValues[opt.id] }))
     .filter((x) => x.val !== null)
+
+  function handleAddToCart() {
+    if (!inStock) return
+
+    const selectedOptions = summaryItems.map(({ val, opt }) => ({
+      label: val?.value ?? opt.name,
+      price: (parseFloat(val?.price ?? '0') || 0) * getOptionQuantity(opt.id, val!),
+    }))
+
+    addItem({
+      type: 'configurable',
+      modelId,
+      name: productName,
+      brandName,
+      basePrice: parseFloat(basePrice) || 0,
+      options: selectedOptions,
+      quantity,
+      image: imageUrl ?? undefined,
+    })
+  }
 
   return (
     <>
@@ -349,7 +375,14 @@ export function ProductConfigurator({
                     +
                   </button>
                 </div>
-                <button className="flex flex-1 items-center justify-center gap-2 rounded-lg bg-[#2ad1a4] px-4 py-2.5 text-sm font-bold text-white shadow transition hover:bg-[#20b890] active:scale-95">
+                <button
+                  type="button"
+                  onClick={handleAddToCart}
+                  disabled={!inStock}
+                  className={`flex flex-1 items-center justify-center gap-2 rounded-lg px-4 py-2.5 text-sm font-bold text-white shadow transition ${
+                    inStock ? 'bg-[#2ad1a4] hover:bg-[#20b890] active:scale-95' : 'cursor-not-allowed bg-slate-300'
+                  }`}
+                >
                   <ShoppingCart size={16} />
                   Ajouter au panier
                 </button>

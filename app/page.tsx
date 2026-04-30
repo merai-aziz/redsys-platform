@@ -20,9 +20,6 @@ import {
   ShoppingCart,
   Sliders,
   Star,
-  Globe,
-  Phone,
-  User,
   Package,
 } from 'lucide-react'
 
@@ -38,6 +35,8 @@ import {
   Card,
   CardContent,
 } from '@/components/ui/card'
+import { useCart } from '@/context/CartContext'
+import { SiteHeader } from '@/components/SiteHeader'
 
 interface Domain { id: string; code: string; name: string; icon?: string | null; displayOrder: number }
 interface Brand { id: string; name: string; logo?: string | null; domainId: string; sortOrder: number }
@@ -569,6 +568,7 @@ function ProductsMegaMenu({ brands, series, models, onPickBrand, onPickSeries }:
 
 export default function Home() {
   const router = useRouter()
+  const { addItem } = useCart()
   const [catalog, setCatalog] = useState<CatalogPayload>({
     domains: [],
     brands: [],
@@ -805,12 +805,46 @@ export default function Home() {
     setMenuOpen(true)
   }
 
+  function addStandardProductToCart(model: Model) {
+    const brandName = catalog.brands.find((brand) => brand.id === model.brandId)?.name ?? model.brandName ?? ''
+
+    addItem({
+      type: 'standard',
+      modelId: model.id,
+      name: model.name,
+      brandName,
+      reference: model.reference,
+      price: model.basePrice,
+      quantity: 1,
+      image: model.image ?? undefined,
+    })
+  }
+
+  function addSparePartToCart(model: Model) {
+    const brandName = catalog.brands.find((brand) => brand.id === model.brandId)?.name ?? model.brandName ?? ''
+
+    addItem({
+      type: 'spare',
+      modelId: model.id,
+      name: model.name,
+      brandName,
+      reference: model.reference,
+      price: model.basePrice,
+      quantity: 1,
+      compatibleModelName: selectedPartsModel?.name ?? undefined,
+      image: model.image ?? undefined,
+    })
+  }
+
   function openModelConfigurator(
     modelId: string,
     context?: {
       domainId: string | null
       brandId: string | null
       seriesId: string | null
+    },
+    options?: {
+      isOutOfStock?: boolean
     },
   ) {
     const model = catalog.models.find((entry) => entry.id === modelId)
@@ -825,7 +859,8 @@ export default function Home() {
       setSelectedModel(modelId)
       return
     }
-    router.push(`/configurator/${modelId}`)
+    const searchParams = options?.isOutOfStock ? '?isOutOfStock=true' : ''
+    router.push(`/configurator/${modelId}${searchParams}`)
   }
 
   useEffect(() => {
@@ -1281,212 +1316,30 @@ export default function Home() {
 
   return (
     <div className="min-h-screen bg-[#f5f7fa] font-sans text-[#1a3a52]">
-      <div className="bg-[#0f2436] text-xs text-white/60">
-        <div className="mx-auto flex max-w-7xl items-center justify-between px-4 py-1.5 sm:px-6 lg:px-8">
-          <span>Livraison rapide · Support technique 24/7</span>
-          <div className="flex items-center gap-4">
-            <span className="flex items-center gap-1"><Globe className="h-3 w-3" /> Français</span>
-            <span className="flex items-center gap-1"><Phone className="h-3 w-3" /> +216 XX XXX XXX</span>
-          </div>
-        </div>
-      </div>
-
-      <header className="sticky top-0 z-40 border-b border-white/10 bg-[#1a3a52] shadow-lg">
-        <div className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8">
-          <div className="flex items-center gap-6 py-4">
-            <div className="shrink-0 text-xl font-black tracking-tight text-white">
-              <Link href="/" aria-label="Accueil" className="block">
-                <Image
-                  src="/redsys-logo.png"
-                  alt="Redsys"
-                  width={220}
-                  height={64}
-                  className="h-12 w-auto"
-                  priority
-                />
-              </Link>
-            </div>
-
-            <div className="relative hidden flex-1 md:block">
-              <Search className="absolute left-4 top-1/2 h-4 w-4 -translate-y-1/2 text-white/40" />
-              <input
-                value={query}
-                onChange={(event) => setQuery(event.target.value)}
-                placeholder="Rechercher un équipement, une référence…"
-                className="h-10 w-full rounded-full bg-white/15 pl-11 pr-4 text-sm text-white placeholder:text-white/40 outline-none transition focus:bg-white/25 focus:ring-2 focus:ring-[#2ad1a4]/50"
-              />
-            </div>
-
-            <div className="flex items-center gap-3 text-sm">
-              <Link href="/login" className="hidden items-center gap-1.5 rounded-full px-3 py-1.5 text-white/70 transition hover:bg-white/10 hover:text-white sm:flex">
-                <User className="h-4 w-4" />
-                <span className="hidden lg:inline">Se connecter</span>
-              </Link>
-              <Link href="/cart" className="flex items-center gap-2 rounded-full bg-[#2ad1a4] px-4 py-2 font-bold text-[#1a3a52] transition hover:bg-[#20b890]">
-                <ShoppingCart className="h-4 w-4" />
-                <span className="hidden sm:inline">Panier</span>
-              </Link>
-            </div>
-          </div>
-
-          <nav
-            ref={menuRef}
-            onMouseLeave={() => {
-              setMenuOpen(false)
-              setActiveMenu(null)
-            }}
-            className="relative border-t border-white/10"
-          >
-            <div className="flex items-center gap-1 py-2">
-              <button
-                onMouseEnter={openProductsMenuVisual}
-                onClick={() => {
-                  if (menuOpen && activeMenu === 'products') {
-                    setMenuOpen(false)
-                    setActiveMenu(null)
-                    return
-                  }
-                  openProductsMenu()
-                }}
-                className={`flex items-center gap-2 rounded-lg px-4 py-2 text-sm font-bold transition ${menuOpen && activeMenu === 'products' ? 'bg-white text-[#1a3a52]' : 'text-white hover:bg-white/10'}`}
-              >
-                Produits
-                <ChevronDown className={`h-3.5 w-3.5 transition-transform ${menuOpen && activeMenu === 'products' ? 'rotate-180' : ''}`} />
-              </button>
-
-              <button
-                onMouseEnter={() => openMenuVisual('server')}
-                onClick={() => {
-                  if (menuOpen && activeMenu === 'server') {
-                    setMenuOpen(false)
-                    setActiveMenu(null)
-                    return
-                  }
-                  openDomainMenu('server', serverDomainId)
-                }}
-                className={`flex items-center gap-2 rounded-lg px-4 py-2 text-sm font-bold transition ${menuOpen && activeMenu === 'server' ? 'bg-white text-[#1a3a52]' : 'text-white hover:bg-white/10'}`}
-              >
-                Serveur-configurateur
-                <ChevronDown className={`h-3.5 w-3.5 transition-transform ${menuOpen && activeMenu === 'server' ? 'rotate-180' : ''}`} />
-              </button>
-
-              <button
-                onMouseEnter={() => openMenuVisual('storage')}
-                onClick={() => {
-                  if (menuOpen && activeMenu === 'storage') {
-                    setMenuOpen(false)
-                    setActiveMenu(null)
-                    return
-                  }
-                  openDomainMenu('storage', storageDomainId)
-                }}
-                className={`flex items-center gap-2 rounded-lg px-4 py-2 text-sm font-bold transition ${menuOpen && activeMenu === 'storage' ? 'bg-white text-[#1a3a52]' : 'text-white hover:bg-white/10'}`}
-              >
-                Storage-configurateur
-                <ChevronDown className={`h-3.5 w-3.5 transition-transform ${menuOpen && activeMenu === 'storage' ? 'rotate-180' : ''}`} />
-              </button>
-
-              <button
-                onMouseEnter={() => openMenuVisual('network')}
-                onClick={() => {
-                  if (menuOpen && activeMenu === 'network') {
-                    setMenuOpen(false)
-                    setActiveMenu(null)
-                    return
-                  }
-                  openDomainMenu('network', networkDomainId)
-                }}
-                className={`flex items-center gap-2 rounded-lg px-4 py-2 text-sm font-bold transition ${menuOpen && activeMenu === 'network' ? 'bg-white text-[#1a3a52]' : 'text-white hover:bg-white/10'}`}
-              >
-                Reseau-configurateur
-                <ChevronDown className={`h-3.5 w-3.5 transition-transform ${menuOpen && activeMenu === 'network' ? 'rotate-180' : ''}`} />
-              </button>
-
-            </div>
-
-            {menuOpen && (
-              <>
-                {activeMenu === 'products' && (
-                  <ProductsMegaMenu
-                    brands={catalog.brands}
-                    series={catalog.series}
-                    models={catalog.models}
-                    onPickBrand={(brandId) => {
-                      selectDomain('domain-products')
-                      setSelectedBrand(brandId)
-                      setSelectedSeries(null)
-                      setSelectedModel(null)
-                      setStockFilter('all')
-                      setPoeFilter('all')
-                      setSelectedSpecFilters({})
-                      setMenuOpen(false)
-                      setActiveMenu(null)
-                    }}
-                    onPickSeries={(brandId, seriesId) => {
-                      selectDomain('domain-products')
-                      setSelectedBrand(brandId)
-                      setSelectedSeries(seriesId)
-                      setSelectedModel(null)
-                      setStockFilter('all')
-                      setPoeFilter('all')
-                      setSelectedSpecFilters({})
-                      setMenuOpen(false)
-                      setActiveMenu(null)
-                    }}
-                  />
-                )}
-
-                {(activeMenu === 'server' || activeMenu === 'storage' || activeMenu === 'network') && (
-                  <DomainMegaMenu
-                    domain={activeDomain}
-                    brands={catalog.brands}
-                    series={catalog.series}
-                    models={catalog.models}
-                    selectedBrand={selectedBrand}
-                    selectedSeries={selectedSeries}
-                    selectedModel={selectedModel}
-                    familyTitle={activeMenu === 'server' ? 'Familles' : 'Series'}
-                    exploreLabel={activeMenu === 'server' ? 'Explorer tous les serveurs' : activeMenu === 'storage' ? 'Explorer tout le storage' : 'Explorer tout le reseau'}
-                    getFamilyLabel={activeMenu === 'server' ? getServerFamilyLabel : undefined}
-                    onSelectDomain={selectDomain}
-                    onSelectBrand={(brandId) => {
-                      setSelectedBrand(brandId)
-                      setSelectedSpecFilters({})
-                    }}
-                    onSelectSeries={(seriesId) => {
-                      setSelectedSeries(seriesId)
-                      setSelectedSpecFilters({})
-                    }}
-                    onSelectModel={(modelId, context) => {
-                      if (modelId) {
-                        openModelConfigurator(modelId, context)
-                        return
-                      }
-                      setSelectedModel(null)
-                    }}
-                    onClose={() => {
-                      setMenuOpen(false)
-                      setActiveMenu(null)
-                    }}
-                  />
-                )}
-              </>
-            )}
-          </nav>
-        </div>
-
-        <div className="border-t border-white/10 px-4 py-2 md:hidden">
-          <div className="flex items-center gap-2 rounded-full bg-white/15 px-4 py-2">
-            <Search className="h-4 w-4 text-white/40" />
-            <input
-              value={query}
-              onChange={(event) => setQuery(event.target.value)}
-              placeholder="Rechercher..."
-              className="flex-1 bg-transparent text-sm text-white placeholder:text-white/40 outline-none"
-            />
-          </div>
-        </div>
-      </header>
+      <SiteHeader
+        catalog={catalog}
+        query={query}
+        onQueryChange={setQuery}
+        onSelectDomain={selectDomain}
+        onSelectBrand={(brandId) => {
+          setSelectedBrand(brandId)
+          setSelectedSpecFilters({})
+        }}
+        onSelectSeries={(seriesId) => {
+          setSelectedSeries(seriesId)
+          setSelectedSpecFilters({})
+        }}
+        onSelectModel={(modelId, context) => {
+          if (modelId) {
+            openModelConfigurator(modelId, context)
+            return
+          }
+          setSelectedModel(null)
+        }}
+        selectedBrand={selectedBrand}
+        selectedSeries={selectedSeries}
+        selectedModel={selectedModel}
+      />
 
       {hasActiveSelection && (
         <section className="border-b border-[#d0d9e3] bg-white">
@@ -1954,9 +1807,10 @@ export default function Home() {
                                   </p>
                                   <button
                                     type="button"
-                                    onClick={() => openModelConfigurator(model.id)}
-                                    className="inline-flex items-center justify-center rounded-full bg-[#2ad1a4] p-2 text-white transition hover:bg-[#20b890]"
-                                    title="Ajouter au panier"
+                                    disabled={!inStock}
+                                    onClick={() => addSparePartToCart(model)}
+                                    className={`inline-flex items-center justify-center rounded-full p-2 text-white transition ${inStock ? 'bg-[#2ad1a4] hover:bg-[#20b890]' : 'cursor-not-allowed bg-slate-300 text-slate-500'}`}
+                                    title={inStock ? 'Ajouter au panier' : 'Rupture de stock'}
                                   >
                                     <ShoppingCart className="h-5 w-5" />
                                   </button>
@@ -2358,10 +2212,16 @@ export default function Home() {
                             <p className="text-lg font-black text-[#1a3a52]">{model.basePrice.toLocaleString('fr-FR', { style: 'currency', currency: 'EUR' })}</p>
                             <button
                               type="button"
-                              disabled={!isInStock}
-                              onClick={() => openModelConfigurator(model.id)}
-                              className={`inline-flex items-center justify-center rounded-full p-2 text-white transition ${isInStock ? 'bg-[#2ad1a4] hover:bg-[#20b890]' : 'cursor-not-allowed bg-slate-300 text-slate-500'}`}
-                              title={isInStock ? (isConfiguratorDomain ? 'Configurer le modèle' : 'Ajouter au panier') : 'Rupture de stock'}
+                              onClick={() => {
+                                if (isConfiguratorDomain) {
+                                  openModelConfigurator(model.id, undefined, { isOutOfStock: !isInStock })
+                                  return
+                                }
+                                addStandardProductToCart(model)
+                              }}
+                              disabled={isConfiguratorDomain ? false : !isInStock}
+                              className={`inline-flex items-center justify-center rounded-full p-2 text-white transition ${isConfiguratorDomain ? 'bg-[#2ad1a4] hover:bg-[#20b890]' : isInStock ? 'bg-[#2ad1a4] hover:bg-[#20b890]' : 'cursor-not-allowed bg-slate-300 text-slate-500'}`}
+                              title={isConfiguratorDomain ? 'Configurer le modèle' : isInStock ? 'Ajouter au panier' : 'Rupture de stock'}
                             >
                               {isConfiguratorDomain ? (
                                 <Sliders className="h-5 w-5" />
@@ -2465,10 +2325,10 @@ export default function Home() {
                         <p className="text-lg font-black text-[#1a3a52]">{model.basePrice.toLocaleString('fr-FR', { style: 'currency', currency: 'EUR' })}</p>
                         <button
                           type="button"
-                              disabled={!isInStock}
-                          onClick={() => openModelConfigurator(model.id)}
-                              className={`inline-flex items-center justify-center rounded-full p-2 text-white transition ${isInStock ? 'bg-[#2ad1a4] hover:bg-[#20b890]' : 'cursor-not-allowed bg-slate-300 text-slate-500'}`}
-                              title={isInStock ? 'Ajouter au panier' : 'Rupture de stock'}
+                          disabled={!isInStock}
+                          onClick={() => addStandardProductToCart(model)}
+                          className={`inline-flex items-center justify-center rounded-full p-2 text-white transition ${isInStock ? 'bg-[#2ad1a4] hover:bg-[#20b890]' : 'cursor-not-allowed bg-slate-300 text-slate-500'}`}
+                          title={isInStock ? 'Ajouter au panier' : 'Rupture de stock'}
                         >
                           <ShoppingCart className="h-5 w-5" />
                         </button>

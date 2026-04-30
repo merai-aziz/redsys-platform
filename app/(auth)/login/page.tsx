@@ -1,5 +1,6 @@
 'use client'
 import { useState } from 'react'
+import { useRouter, useSearchParams } from 'next/navigation'
 import { useForm } from 'react-hook-form'
 import { zodResolver } from '@hookform/resolvers/zod'
 import * as z from 'zod'
@@ -9,6 +10,7 @@ import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { toast } from 'sonner'
+import { useAuth } from '@/context/AuthContext'
 
 const schema = z.object({
   email: z.string().email('Email invalide'),
@@ -17,38 +19,47 @@ const schema = z.object({
 type FormData = z.infer<typeof schema>
 
 export default function LoginPage() {
+  const router = useRouter()
+  const searchParams = useSearchParams()
+  const redirect = searchParams.get('redirect') ?? '/'
   const [showPwd, setShowPwd] = useState(false)
-  const [loading, setLoading] = useState(false)
+  const [submitting, setSubmitting] = useState(false)
+
+  const { login } = useAuth()
 
   const { register, handleSubmit, formState: { errors } } = useForm<FormData>({
     resolver: zodResolver(schema)
   })
 
   const onSubmit = async (data: FormData) => {
-    setLoading(true)
+    setSubmitting(true)
     try {
-      const res = await fetch('/api/auth/login', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(data),
-      })
-      const json = await res.json()
-
-      if (!res.ok) {
-        if (res.status === 401) toast.error('Email ou mot de passe incorrect')
-        else toast.error(json.error || 'Erreur de connexion')
+      const result = await login(data.email, data.password)
+      if (!result.success) {
+        toast.error(result.error || 'Erreur de connexion')
         return
       }
 
       toast.success('Connexion réussie !')
-      const role = json.user.role
-      if (role === 'ADMIN') window.location.assign('/admin/logs')
-      else if (role === 'EMPLOYEE') window.location.assign('/employee/profile')
-      else window.location.assign('/client/profile')
+      // Refresh server components so Next.js sees the new session cookie
+      router.refresh()
+      // Small delay to allow the refresh to propagate
+      await new Promise((resolve) => setTimeout(resolve, 100))
+      if (result.user?.role === 'admin') {
+        await router.push('/admin')
+        return
+      }
+
+      if (result.user?.role === 'employee') {
+        await router.push('/employee')
+        return
+      }
+
+      await router.push(redirect)
     } catch {
       toast.error('Erreur réseau')
     } finally {
-      setLoading(false)
+      setSubmitting(false)
     }
   }
 
@@ -99,11 +110,11 @@ export default function LoginPage() {
 
           <Button
             type="submit"
-            disabled={loading}
+            disabled={submitting}
             className="w-full h-11 bg-gradient-to-r from-[#4F6EF7] to-[#7C3AED] 
                        hover:opacity-90 text-white font-semibold rounded-xl border-0"
           >
-            {loading ? <Loader2 className="w-4 h-4 animate-spin" /> : 'Se connecter'}
+            {submitting ? <Loader2 className="w-4 h-4 animate-spin" /> : 'Se connecter'}
           </Button>
         </form>
 
