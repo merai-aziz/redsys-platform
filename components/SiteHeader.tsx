@@ -141,6 +141,7 @@ function DomainMegaMenu({
   const activeDomainId = domain?.id ?? null
   const [hoveredBrand, setHoveredBrand] = useState<string | null>(selectedBrand ?? null)
   const [hoveredSeries, setHoveredSeries] = useState<string | null>(selectedSeries ?? null)
+  const [mobileTab, setMobileTab] = useState<'brands' | 'series' | 'models'>('brands')
 
   const modelsInDomain = useMemo(
     () => models.filter((model) => model.domainId === activeDomainId),
@@ -182,25 +183,59 @@ function DomainMegaMenu({
   )
 
   return (
-    <div className="absolute left-0 top-full z-50 w-full animate-in slide-in-from-top-2 fade-in shadow-2xl duration-150">
+    <div className="absolute left-0 top-full z-50 w-full max-h-[calc(100vh-120px)] overflow-y-auto overscroll-contain animate-in slide-in-from-top-2 fade-in shadow-2xl duration-150">
       <div className="mx-auto max-w-7xl">
-        <div className="flex overflow-hidden rounded-b-2xl border border-t-0 border-[#d0d9e3] bg-white">
-          <div className="w-52 shrink-0 border-r border-[#eef1f5] bg-[#f8fafc]">
-            <p className="px-5 pb-3 pt-5 text-[10px] font-bold uppercase tracking-widest text-[#a5b8cc]">Marques</p>
-            {brandsInDomain.length === 0 ? (
-              <p className="px-5 py-3 text-xs text-[#a5b8cc]">Aucune marque</p>
-            ) : (
-              brandsInDomain.map((brand) => (
+        <div className="rounded-b-2xl border border-t-0 border-[#d0d9e3] bg-white overflow-hidden">
+          
+          {/* VERSION MOBILE : onglets + contenu scrollable */}
+          <div className="flex flex-col lg:hidden">
+            
+            {/* Barre d'onglets sticky en haut du menu */}
+            <div className="flex border-b border-[#eef1f5] bg-[#f8fafc]">
+              {[
+                { key: 'brands' as const, label: 'Marques', count: (modelsInDomain.length > 0 ? brandsInDomain.length : 0) },
+                { key: 'series' as const, label: familyTitle, count: (modelsInDomain.length > 0 ? seriesInBrand.length : 0) },
+                { key: 'models' as const, label: 'Modèles', count: (modelsInDomain.length > 0 ? modelsInSeries.length : 0) },
+              ].map((tab) => (
+                <button
+                  key={tab.key}
+                  onClick={() => setMobileTab(tab.key)}
+                  className={`flex flex-1 items-center justify-center gap-1.5 py-3 text-xs font-bold transition ${
+                    mobileTab === tab.key
+                      ? 'border-b-2 border-[#2ad1a4] text-[#1a3a52]'
+                      : 'text-[#a5b8cc]'
+                  }`}
+                >
+                  {tab.label}
+                  <span className={`rounded-full px-1.5 py-0.5 text-[10px] ${
+                    mobileTab === tab.key ? 'bg-[#2ad1a4] text-white' : 'bg-[#eef1f5] text-[#a5b8cc]'
+                  }`}>
+                    {tab.count}
+                  </span>
+                </button>
+              ))}
+            </div>
+
+            {/* Contenu de l'onglet actif — scrollable verticalement */}
+            <div className="max-h-64 overflow-y-auto overscroll-contain">
+              
+              {mobileTab === 'brands' && brandsInDomain.length === 0 && (
+                <p className="px-5 py-4 text-xs text-[#a5b8cc]">Aucune marque</p>
+              )}
+
+              {mobileTab === 'brands' && brandsInDomain.map((brand) => (
                 <button
                   key={brand.id}
                   onMouseEnter={() => setHoveredBrand(brand.id)}
                   onClick={() => {
+                    setHoveredBrand(brand.id)
+                    setMobileTab('series')
                     onSelectDomain(activeDomainId)
                     onSelectBrand(selectedBrand === brand.id ? null : brand.id)
                     onSelectSeries(null)
                     onSelectModel(null)
                   }}
-                  className={`flex w-full items-center justify-between px-5 py-2.5 text-sm font-semibold transition-colors ${
+                  className={`flex w-full items-center justify-between px-5 py-3 text-sm font-semibold transition-colors ${
                     hoveredBrand === brand.id
                       ? 'bg-[#2ad1a4] text-white'
                       : 'text-[#1a3a52] hover:bg-[#eef3f8]'
@@ -209,26 +244,27 @@ function DomainMegaMenu({
                   <span>{brand.name}</span>
                   <ChevronRight className="h-3.5 w-3.5 opacity-60" />
                 </button>
-              ))
-            )}
-          </div>
+              ))}
 
-          <div className="w-56 shrink-0 border-r border-[#eef1f5]">
-            <p className="px-5 pb-3 pt-5 text-[10px] font-bold uppercase tracking-widest text-[#a5b8cc]">{familyTitle}</p>
-            {seriesInBrand.length === 0 ? (
-              <p className="px-5 py-3 text-xs text-[#a5b8cc]">Aucune famille</p>
-            ) : (
-              seriesInBrand.map((serie) => (
+              {mobileTab === 'series' && seriesInBrand.length === 0 && (
+                <p className="px-5 py-4 text-xs text-[#a5b8cc]">
+                  Sélectionnez une marque d'abord
+                </p>
+              )}
+
+              {mobileTab === 'series' && seriesInBrand.map((serie) => (
                 <button
                   key={serie.id}
                   onMouseEnter={() => setHoveredSeries(serie.id)}
                   onClick={() => {
+                    setHoveredSeries(serie.id)
+                    setMobileTab('models')
                     onSelectDomain(activeDomainId)
                     onSelectBrand(effectiveHoveredBrand)
                     onSelectSeries(selectedSeries === serie.id ? null : serie.id)
                     onSelectModel(null)
                   }}
-                  className={`flex w-full items-center gap-2 px-5 py-2.5 text-sm transition-colors ${
+                  className={`flex w-full items-center gap-2 px-5 py-3 text-sm transition-colors ${
                     selectedSeries === serie.id
                       ? 'bg-[#2ad1a4] font-semibold text-white'
                       : 'text-[#334e68] hover:bg-[#f0f7ff] hover:text-[#1a3a52]'
@@ -237,16 +273,15 @@ function DomainMegaMenu({
                   <span className="h-1.5 w-1.5 shrink-0 rounded-full bg-[#2ad1a4]" />
                   <span>{getFamilyLabel ? getFamilyLabel(serie) : serie.name}</span>
                 </button>
-              ))
-            )}
-          </div>
+              ))}
 
-          <div className="w-80 shrink-0 border-r border-[#eef1f5]">
-            <p className="px-5 pb-3 pt-5 text-[10px] font-bold uppercase tracking-widest text-[#a5b8cc]">Modeles</p>
-            {modelsInSeries.length === 0 ? (
-              <p className="px-5 py-3 text-xs text-[#a5b8cc]">Aucun modele</p>
-            ) : (
-              modelsInSeries.map((model) => (
+              {mobileTab === 'models' && modelsInSeries.length === 0 && (
+                <p className="px-5 py-4 text-xs text-[#a5b8cc]">
+                  Sélectionnez une famille d'abord
+                </p>
+              )}
+
+              {mobileTab === 'models' && modelsInSeries.map((model) => (
                 <button
                   key={model.id}
                   onClick={() => {
@@ -257,7 +292,7 @@ function DomainMegaMenu({
                     })
                     onClose()
                   }}
-                  className={`flex w-full items-center gap-2 px-5 py-2.5 text-sm transition-colors ${
+                  className={`flex w-full items-center gap-2 px-5 py-3 text-sm transition-colors ${
                     selectedModel === model.id
                       ? 'bg-[#2ad1a4] font-semibold text-white'
                       : 'text-[#334e68] hover:bg-[#f0f7ff]'
@@ -266,39 +301,143 @@ function DomainMegaMenu({
                   <span className="h-1.5 w-1.5 shrink-0 rounded-full bg-[#a5b8cc]" />
                   {model.name}
                 </button>
-              ))
-            )}
+              ))}
+            </div>
+
+            {/* Bouton explorer en bas sur mobile */}
+            <div className="border-t border-[#eef1f5] p-4">
+              <button
+                onClick={() => {
+                  onSelectDomain(activeDomainId)
+                  onSelectBrand(null)
+                  onSelectSeries(null)
+                  onSelectModel(null)
+                  onClose()
+                }}
+                className="w-full rounded-full bg-[#1a3a52] py-2.5 text-sm font-bold text-white transition hover:bg-[#2ad1a4] hover:text-[#1a3a52]"
+              >
+                {exploreLabel}
+              </button>
+            </div>
           </div>
 
-          <div className="flex-1 p-8">
-            {domain ? (
-              <div className="h-full">
-                <h3 className="text-2xl font-black text-[#1a3a52]">
-                  {domain.icon && <span className="mr-2">{domain.icon}</span>}
-                  {domain.name}
-                </h3>
-                <p className="mt-2 text-sm text-[#5a7a9a]">
-                  {brandsInDomain.length} marque(s) · {seriesInBrand.length} famille(s) · {modelsInSeries.length} modele(s)
-                </p>
-                <button
-                  onClick={() => {
-                    onSelectDomain(activeDomainId)
-                    onSelectBrand(null)
-                    onSelectSeries(null)
-                    onSelectModel(null)
-                    onClose()
-                  }}
-                  className="mt-6 inline-flex items-center gap-2 rounded-full bg-[#1a3a52] px-5 py-2 text-sm font-bold text-white transition hover:bg-[#2ad1a4] hover:text-[#1a3a52]"
-                >
-                  {exploreLabel}
-                  <ChevronRight className="h-4 w-4" />
-                </button>
-              </div>
-            ) : (
-              <div className="flex h-full items-center justify-center text-[#a5b8cc]">
-                <p className="text-sm">Survolez un domaine</p>
-              </div>
-            )}
+          {/* VERSION DESKTOP : colonnes fixes comme avant */}
+          <div className="hidden lg:flex overflow-hidden">
+            <div className="w-52 shrink-0 border-r border-[#eef1f5] bg-[#f8fafc]">
+              <p className="px-5 pb-3 pt-5 text-[10px] font-bold uppercase tracking-widest text-[#a5b8cc]">Marques</p>
+              {brandsInDomain.length === 0 ? (
+                <p className="px-5 py-3 text-xs text-[#a5b8cc]">Aucune marque</p>
+              ) : (
+                brandsInDomain.map((brand) => (
+                  <button
+                    key={brand.id}
+                    onMouseEnter={() => setHoveredBrand(brand.id)}
+                    onClick={() => {
+                      onSelectDomain(activeDomainId)
+                      onSelectBrand(selectedBrand === brand.id ? null : brand.id)
+                      onSelectSeries(null)
+                      onSelectModel(null)
+                    }}
+                    className={`flex w-full items-center justify-between px-5 py-2.5 text-sm font-semibold transition-colors ${
+                      hoveredBrand === brand.id
+                        ? 'bg-[#2ad1a4] text-white'
+                        : 'text-[#1a3a52] hover:bg-[#eef3f8]'
+                    }`}
+                  >
+                    <span>{brand.name}</span>
+                    <ChevronRight className="h-3.5 w-3.5 opacity-60" />
+                  </button>
+                ))
+              )}
+            </div>
+
+            <div className="w-56 shrink-0 border-r border-[#eef1f5]">
+              <p className="px-5 pb-3 pt-5 text-[10px] font-bold uppercase tracking-widest text-[#a5b8cc]">{familyTitle}</p>
+              {seriesInBrand.length === 0 ? (
+                <p className="px-5 py-3 text-xs text-[#a5b8cc]">Aucune famille</p>
+              ) : (
+                seriesInBrand.map((serie) => (
+                  <button
+                    key={serie.id}
+                    onMouseEnter={() => setHoveredSeries(serie.id)}
+                    onClick={() => {
+                      onSelectDomain(activeDomainId)
+                      onSelectBrand(effectiveHoveredBrand)
+                      onSelectSeries(selectedSeries === serie.id ? null : serie.id)
+                      onSelectModel(null)
+                    }}
+                    className={`flex w-full items-center gap-2 px-5 py-2.5 text-sm transition-colors ${
+                      selectedSeries === serie.id
+                        ? 'bg-[#2ad1a4] font-semibold text-white'
+                        : 'text-[#334e68] hover:bg-[#f0f7ff] hover:text-[#1a3a52]'
+                    }`}
+                  >
+                    <span className="h-1.5 w-1.5 shrink-0 rounded-full bg-[#2ad1a4]" />
+                    <span>{getFamilyLabel ? getFamilyLabel(serie) : serie.name}</span>
+                  </button>
+                ))
+              )}
+            </div>
+
+            <div className="w-80 shrink-0 border-r border-[#eef1f5]">
+              <p className="px-5 pb-3 pt-5 text-[10px] font-bold uppercase tracking-widest text-[#a5b8cc]">Modeles</p>
+              {modelsInSeries.length === 0 ? (
+                <p className="px-5 py-3 text-xs text-[#a5b8cc]">Aucun modele</p>
+              ) : (
+                modelsInSeries.map((model) => (
+                  <button
+                    key={model.id}
+                    onClick={() => {
+                      onSelectModel(selectedModel === model.id ? null : model.id, {
+                        domainId: activeDomainId,
+                        brandId: effectiveHoveredBrand,
+                        seriesId: effectiveHoveredSeries,
+                      })
+                      onClose()
+                    }}
+                    className={`flex w-full items-center gap-2 px-5 py-2.5 text-sm transition-colors ${
+                      selectedModel === model.id
+                        ? 'bg-[#2ad1a4] font-semibold text-white'
+                        : 'text-[#334e68] hover:bg-[#f0f7ff]'
+                    }`}
+                  >
+                    <span className="h-1.5 w-1.5 shrink-0 rounded-full bg-[#a5b8cc]" />
+                    {model.name}
+                  </button>
+                ))
+              )}
+            </div>
+
+            <div className="flex-1 p-8">
+              {domain ? (
+                <div className="h-full">
+                  <h3 className="text-2xl font-black text-[#1a3a52]">
+                    {domain.icon && <span className="mr-2">{domain.icon}</span>}
+                    {domain.name}
+                  </h3>
+                  <p className="mt-2 text-sm text-[#5a7a9a]">
+                    {brandsInDomain.length} marque(s) · {seriesInBrand.length} famille(s) · {modelsInSeries.length} modele(s)
+                  </p>
+                  <button
+                    onClick={() => {
+                      onSelectDomain(activeDomainId)
+                      onSelectBrand(null)
+                      onSelectSeries(null)
+                      onSelectModel(null)
+                      onClose()
+                    }}
+                    className="mt-6 inline-flex items-center gap-2 rounded-full bg-[#1a3a52] px-5 py-2 text-sm font-bold text-white transition hover:bg-[#2ad1a4] hover:text-[#1a3a52]"
+                  >
+                    {exploreLabel}
+                    <ChevronRight className="h-4 w-4" />
+                  </button>
+                </div>
+              ) : (
+                <div className="flex h-full items-center justify-center text-[#a5b8cc]">
+                  <p className="text-sm">Survolez un domaine</p>
+                </div>
+              )}
+            </div>
           </div>
         </div>
       </div>
@@ -350,43 +489,45 @@ function ProductsMegaMenu({
   }, [brands, models, series])
 
   return (
-    <div className="absolute left-0 top-full z-50 w-full animate-in slide-in-from-top-2 fade-in shadow-2xl duration-150">
-      <div className="mx-auto max-w-7xl rounded-b-2xl border border-t-0 border-[#d0d9e3] bg-[#d9e2e5] p-8">
-        <div className="grid grid-cols-2 gap-6 md:grid-cols-3 xl:grid-cols-6">
-          {cards.map((card) => (
-            <div key={card.id}>
-              <button
-                onClick={() => onPickBrand(card.id)}
-                className="text-left text-2xl font-black uppercase tracking-tight text-[#0d2032] transition hover:text-[#1a3a52]"
-              >
-                {card.name}
-              </button>
-              <ul className="mt-3 space-y-1 text-[15px] font-medium text-[#1f3347]">
-                {card.categories.map((item) => (
-                  <li key={`${card.id}-${item.label}`}>
-                    <button
-                      onClick={() => {
-                        if (item.id) {
-                          onPickSeries(card.id, item.id)
-                          return
-                        }
-                        onPickBrand(card.id)
-                      }}
-                      className="text-left transition hover:text-[#1a3a52]"
-                    >
-                      {item.label.toUpperCase()}
-                    </button>
-                  </li>
-                ))}
-              </ul>
-              <button
-                onClick={() => onPickBrand(card.id)}
-                className="mt-3 text-sm font-semibold text-[#1a3a52] underline underline-offset-4"
-              >
-                Elargir
-              </button>
-            </div>
-          ))}
+    <div className="absolute left-0 top-full z-50 w-full max-h-[calc(100vh-120px)] overflow-y-auto overscroll-contain animate-in slide-in-from-top-2 fade-in shadow-2xl duration-150">
+      <div className="mx-auto max-w-7xl rounded-b-2xl border border-t-0 border-[#d0d9e3] bg-[#d9e2e5]">
+        <div className="max-h-[70vh] overflow-y-auto overscroll-contain">
+          <div className="grid grid-cols-2 gap-4 p-4 sm:gap-6 sm:p-8 md:grid-cols-3 xl:grid-cols-6">
+            {cards.map((card) => (
+              <div key={card.id}>
+                <button
+                  onClick={() => onPickBrand(card.id)}
+                  className="text-left text-2xl font-black uppercase tracking-tight text-[#0d2032] transition hover:text-[#1a3a52]"
+                >
+                  {card.name}
+                </button>
+                <ul className="mt-3 space-y-1 text-[15px] font-medium text-[#1f3347]">
+                  {card.categories.map((item) => (
+                    <li key={`${card.id}-${item.label}`}>
+                      <button
+                        onClick={() => {
+                          if (item.id) {
+                            onPickSeries(card.id, item.id)
+                            return
+                          }
+                          onPickBrand(card.id)
+                        }}
+                        className="text-left transition hover:text-[#1a3a52]"
+                      >
+                        {item.label.toUpperCase()}
+                      </button>
+                    </li>
+                  ))}
+                </ul>
+                <button
+                  onClick={() => onPickBrand(card.id)}
+                  className="mt-3 text-sm font-semibold text-[#1a3a52] underline underline-offset-4"
+                >
+                  Elargir
+                </button>
+              </div>
+            ))}
+          </div>
         </div>
       </div>
     </div>
@@ -612,7 +753,7 @@ export function SiteHeader({
           onMouseLeave={closeMenu}
           className="relative border-t border-white/10"
         >
-          <div className="flex items-center gap-1 py-2">
+          <div className="flex items-center gap-1 py-2 overflow-x-auto scrollbar-hide">
             <button
               onMouseEnter={openProductsMenuVisual}
               onClick={() => {

@@ -5,7 +5,7 @@ import { toast } from 'sonner'
 
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
-import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog'
+import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
@@ -442,6 +442,9 @@ export default function AdminProductsPage() {
         <DialogContent className="max-h-[90vh] overflow-y-auto sm:max-w-2xl">
           <DialogHeader>
             <DialogTitle>{editingId ? 'Modifier le produit' : 'Nouveau produit'}</DialogTitle>
+            <DialogDescription>
+              Gérez les informations détaillées du produit, ses spécifications et ses options configurables.
+            </DialogDescription>
           </DialogHeader>
 
           <div className="grid gap-4 sm:grid-cols-2">
@@ -739,6 +742,9 @@ export default function AdminProductsPage() {
             <DialogTitle>
               Options configurables {optionDialogProduct ? `- ${optionDialogProduct.name}` : ''}
             </DialogTitle>
+            <DialogDescription>
+              Configurez les options disponibles et les variations de prix pour ce produit.
+            </DialogDescription>
           </DialogHeader>
 
           <div className="space-y-3">
