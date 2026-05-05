@@ -70,24 +70,29 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
   useEffect(() => {
     let mounted = true
+    const controller = new AbortController()
 
     async function checkSession() {
       try {
-        const res = await fetch('/api/auth/me', { credentials: 'include' })
+        const res = await fetch('/api/auth/me', { credentials: 'include', signal: controller.signal })
         if (!res.ok) return
         const data = await res.json()
         if (!mounted) return
         // map API user shape to internal shape with `name`
         setUser(toAuthUser(data?.user))
-      } catch {
+      } catch (err) {
+        if (err instanceof Error && err.name === 'AbortError') return
         // ignore
       } finally {
-        if (mounted) setLoading(false)
+        if (mounted && !controller.signal.aborted) setLoading(false)
       }
     }
 
     void checkSession()
-    return () => { mounted = false }
+    return () => {
+      mounted = false
+      controller.abort()
+    }
   }, [])
 
   async function login(email: string, password: string): Promise<LoginResult> {

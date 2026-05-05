@@ -67,7 +67,13 @@ function SheetContent({
         )}
         {...props}
       >
+        {/* Title visually hidden — requis par Radix Dialog pour l'accessibilité */}
+        <SheetPrimitive.Title className="sr-only">
+          Menu de navigation
+        </SheetPrimitive.Title>
+
         {children}
+
         {showCloseButton && (
           <SheetPrimitive.Close data-slot="sheet-close" asChild>
             <Button
@@ -75,9 +81,8 @@ function SheetContent({
               className="absolute top-3 right-3"
               size="icon-sm"
             >
-              <XIcon
-              />
-              <span className="sr-only">Close</span>
+              <XIcon />
+              <span className="sr-only">Fermer</span>
             </Button>
           </SheetPrimitive.Close>
         )}

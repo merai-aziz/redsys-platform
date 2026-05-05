@@ -320,21 +320,47 @@ model CartItem {
 }
 
 model Order {
-  id        String          @id @default(uuid())
-  userId    String
-  status    OrderStatusEnum @default(PENDING)
-  subtotal  Decimal         @db.Decimal(12, 2)
-  tax       Decimal         @db.Decimal(12, 2)
-  shipping  Decimal         @db.Decimal(12, 2)
-  total     Decimal         @db.Decimal(12, 2)
-  createdAt DateTime        @default(now())
-  updatedAt DateTime        @updatedAt
-  items     OrderItem[]
-  user      User            @relation(fields: [userId], references: [id], onDelete: Cascade)
-  payments  Payment[]
+  id              String          @id @default(uuid())
+  userId          String
+  status          OrderStatusEnum @default(PENDING)
+  subtotal        Decimal         @db.Decimal(12, 2)
+  tax             Decimal         @db.Decimal(12, 2)
+  shipping        Decimal         @db.Decimal(12, 2)
+  total           Decimal         @db.Decimal(12, 2)
+  shippingMethod  String          @default("standard")
+  paymentMethod   String          @default("bank")
+  note            String?
+  createdAt       DateTime        @default(now())
+  updatedAt       DateTime        @updatedAt
+  items           OrderItem[]
+  user            User            @relation(fields: [userId], references: [id], onDelete: Cascade)
+  payments        Payment[]
+  shippingAddress ShippingAddress?
 
   @@index([userId])
   @@map("orders")
+}
+
+
+model ShippingAddress {
+  id           String  @id @default(uuid())
+  orderId      String  @unique
+  email        String
+  company      String?
+  firstName    String
+  lastName     String
+  address      String
+  postalCode   String
+  city         String
+  country      String  @default("France")
+  phone        String
+  invoiceEmail String?
+  vatNumber    String?
+  orderNumber  String?
+  neutralDelivery Boolean @default(false)
+  order        Order   @relation(fields: [orderId], references: [id], onDelete: Cascade)
+
+  @@map("shipping_addresses")
 }
 
 model OrderItem {

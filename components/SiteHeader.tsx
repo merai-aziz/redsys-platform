@@ -574,6 +574,7 @@ export function SiteHeader({
   const menuRef = useRef<HTMLElement>(null)
   const authMenuRef = useRef<HTMLDivElement>(null)
   const profileHref = isAdmin ? '/admin' : '/client/profile'
+  const orderHref = isAdmin ? '/admin' : '/client/orders'
 
   const serverDomainId = useMemo(() => findDomainIdByCode(catalog.domains, 'SERVER', 'serveur'), [catalog.domains])
   const storageDomainId = useMemo(() => findDomainIdByCode(catalog.domains, 'STORAGE', 'storage'), [catalog.domains])
@@ -715,6 +716,13 @@ export function SiteHeader({
                       onClick={() => setAuthMenuOpen(false)}
                     >
                       Mon profil
+                    </Link>
+                         <Link
+                      href={orderHref}
+                      className="block px-4 py-3 text-sm font-medium text-[#1a3a52] transition hover:bg-[#f5f7fa]"
+                      onClick={() => setAuthMenuOpen(false)}
+                    >
+                      Mes commandes
                     </Link>
                     <button
                       type="button"

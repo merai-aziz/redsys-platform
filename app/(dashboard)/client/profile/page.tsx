@@ -60,7 +60,9 @@ export default function ClientProfilePage() {
   const passwordReady = passwordRules.every((rule) => rule.ok)
 
   useEffect(() => {
-    fetch('/api/auth/me').then(r => r.json()).then(d => {
+    const controller = new AbortController()
+
+    fetch('/api/auth/me', { signal: controller.signal }).then(r => r.json()).then(d => {
       if (d.user) {
         setUser(d.user)
         setForm({
@@ -72,7 +74,17 @@ export default function ClientProfilePage() {
         })
       }
       setLoading(false)
+    }).catch((err) => {
+      if (err instanceof Error && err.name === 'AbortError') return
+    }).finally(() => {
+      if (!controller.signal.aborted) {
+        setLoading(false)
+      }
     })
+
+    return () => {
+      controller.abort()
+    }
   }, [])
 
   const handleSave = async () => {

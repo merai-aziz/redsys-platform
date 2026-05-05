@@ -53,19 +53,26 @@ export default function AdminUsersPage() {
   const [saving, setSaving] = useState(false)
   const [page, setPage] = useState(1)
 
-  async function fetchUsers() {
+  async function fetchUsers(signal?: AbortSignal) {
     setLoading(true)
     try {
-      const res = await fetch('/api/admin/users')
+      const res = await fetch('/api/admin/users', signal ? { signal } : undefined)
       const data = await res.json()
       setUsers(data.users || [])
+    } catch (err) {
+      if (err instanceof Error && err.name === 'AbortError') return
+      throw err
     } finally {
       setLoading(false)
     }
   }
 
   useEffect(() => {
-    void fetchUsers()
+    const controller = new AbortController()
+    void fetchUsers(controller.signal)
+    return () => {
+      controller.abort()
+    }
   }, [])
 
   function openCreate() {

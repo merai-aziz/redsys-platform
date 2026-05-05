@@ -123,10 +123,18 @@ export default function CartPage() {
   const activeSectionRef = useRef<'products' | 'server' | 'storage' | 'network'>('products')
 
   useEffect(() => {
-    fetch('/api/catalog')
+    const controller = new AbortController()
+
+    fetch('/api/catalog', { signal: controller.signal })
       .then((res) => res.json())
       .then((data) => setCatalog(safePayload(data)))
-      .catch(() => {})
+      .catch((err) => {
+        if (err instanceof Error && err.name === 'AbortError') return
+      })
+
+    return () => {
+      controller.abort()
+    }
   }, [])
 
   const cartSubtotal = totalPrice

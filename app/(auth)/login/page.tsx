@@ -46,7 +46,7 @@ export default function LoginPage() {
       // Small delay to allow the refresh to propagate
       await new Promise((resolve) => setTimeout(resolve, 100))
       if (result.user?.role === 'admin') {
-        await router.push('/admin')
+        await router.push('/admin/catalog')
         return
       }
 

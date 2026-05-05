@@ -939,22 +939,29 @@ export default function Home() {
   }, [networkDomainId, serverDomainId, storageDomainId])
 
   useEffect(() => {
+    const controller = new AbortController()
     const timer = window.setTimeout(async () => {
       setLoading(true)
       try {
-        const res = await fetch('/api/catalog')
+        const res = await fetch('/api/catalog', { signal: controller.signal })
         if (!res.ok) throw new Error('Erreur de chargement du catalogue')
         const data = await res.json()
         setCatalog(safePayload(data))
         setError(null)
-      } catch {
+      } catch (err) {
+        if (err instanceof Error && err.name === 'AbortError') return
         setError('Impossible de charger le catalogue pour le moment.')
       } finally {
-        setLoading(false)
+        if (!controller.signal.aborted) {
+          setLoading(false)
+        }
       }
     }, 200)
 
-    return () => window.clearTimeout(timer)
+    return () => {
+      controller.abort()
+      window.clearTimeout(timer)
+    }
   }, [])
 
   const selectedDomainRecord = useMemo(
