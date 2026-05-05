@@ -34,6 +34,9 @@ model User {
   refreshTokens           RefreshToken[]
   simulations             Simulation[]
   tickets                 Ticket[]
+  assignedTickets  Ticket[]        @relation("AssignedTickets")
+  ticketComments   TicketComment[] @relation("TicketComments")
+  contracts        Contract[]
 
   @@map("users")
 }
@@ -133,6 +136,7 @@ model Product {
   sparepart_filters_as_target SparepartFilter[] @relation("SparepartFiltersAsTarget")
   recommendationItems     RecommendationItem[]
   selected_configurations SelectedConfiguration[]
+  contractItems  ContractItem[]
 
   @@unique([name, brand_id, family_id])
   @@index([brand_id])
@@ -336,6 +340,7 @@ model Order {
   user            User            @relation(fields: [userId], references: [id], onDelete: Cascade)
   payments        Payment[]
   shippingAddress ShippingAddress?
+  contracts  Contract[]
 
   @@index([userId])
   @@map("orders")
@@ -412,19 +417,84 @@ model Quote {
 }
 
 model Ticket {
-  id          String             @id @default(uuid())
-  userId      String
-  title       String
-  description String
-  status      TicketStatusEnum   @default(OPEN)
-  priority    TicketPriorityEnum @default(LOW)
-  createdAt   DateTime           @default(now())
-  updatedAt   DateTime           @updatedAt
-  user        User               @relation(fields: [userId], references: [id], onDelete: Cascade)
+  id           String             @id @default(uuid())
+  userId       String
+  assignedToId String?            // employé assigné
+  contractId   String?            // contrat lié (optionnel)
+  title        String
+  description  String
+  status       TicketStatusEnum   @default(OPEN)
+  priority     TicketPriorityEnum @default(LOW)
+  createdAt    DateTime           @default(now())
+  updatedAt    DateTime           @updatedAt
+  user         User               @relation(fields: [userId], references: [id], onDelete: Cascade)
+  assignedTo   User?              @relation("AssignedTickets", fields: [assignedToId], references: [id])
+  contract     Contract?          @relation(fields: [contractId], references: [id])
+  comments     TicketComment[]
 
   @@index([userId])
+  @@index([assignedToId])
+  @@index([contractId])
   @@map("tickets")
 }
+
+
+model TicketComment {
+  id        String   @id @default(uuid())
+  ticketId  String
+  authorId  String
+  content   String
+  createdAt DateTime @default(now())
+  ticket    Ticket   @relation(fields: [ticketId], references: [id], onDelete: Cascade)
+  author    User     @relation("TicketComments", fields: [authorId], references: [id])
+
+  @@index([ticketId])
+  @@map("ticket_comments")
+}
+
+model Contract {
+  id               String    @id @default(uuid())
+  userId           String
+  orderId          String?
+  companyName      String
+  clientFirstName  String
+  clientLastName   String
+  clientEmail      String
+  clientPhone      String?
+  description      String?
+  fileUrl          String?   // chemin vers le contrat PDF/fichier
+  warrantyMonths   Int       @default(12)
+  warrantyStart    DateTime
+  warrantyEnd      DateTime
+  createdAt        DateTime  @default(now())
+  updatedAt        DateTime  @updatedAt
+  user             User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  order            Order?    @relation(fields: [orderId], references: [id])
+  tickets          Ticket[]
+  contractItems    ContractItem[]
+
+  @@index([userId])
+  @@index([orderId])
+  @@map("contracts")
+}
+
+model ContractItem {
+  id          String   @id @default(uuid())
+  contractId  String
+  productId   Int?
+  name        String   // nom du produit (dénormalisé pour historique)
+  description String?
+  quantity    Int      @default(1)
+  contract    Contract @relation(fields: [contractId], references: [id], onDelete: Cascade)
+  product     Product? @relation(fields: [productId], references: [id])
+
+  @@index([contractId])
+  @@map("contract_items")
+}
+
+
+
+
 
 model Notification {
   id            String                 @id @default(uuid())
@@ -662,11 +732,12 @@ enum PaymentStatusEnum {
 }
 
 enum TicketStatusEnum {
-  OPEN
-  IN_PROGRESS
-  CLOSED
+  OPEN          // ouvert par le client
+  ACCEPTED      // accepté par l'admin
+  IN_PROGRESS   // en cours de traitement (assigné à un employé)
+  RESOLVED      // résolu par l'employé
+  CLOSED        // fermé définitivement
 }
-
 enum TicketPriorityEnum {
   LOW
   MEDIUM

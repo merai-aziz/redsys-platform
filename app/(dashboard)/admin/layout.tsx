@@ -1,6 +1,6 @@
 'use client'
  
-import { FileText, Users, Package, Layers, ShoppingCart } from 'lucide-react'
+import { FileText, Users, Package, Layers, ShoppingCart, Ticket } from 'lucide-react'
 import { DashboardShell } from '@/components/dashboard-shell'
  
 export default function AdminLayout({ children }: { children: React.ReactNode }) {
@@ -14,7 +14,9 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
       navItems={[
         { href: '/admin/catalog', label: 'Catalogue', icon: Layers },
         { href: '/admin/products', label: 'Produits', icon: Package },
-        { href: '/admin/orders', label: 'Commandes', icon: ShoppingCart },  // ← NOUVEAU
+        { href: '/admin/orders', label: 'Commandes', icon: ShoppingCart }, 
+        { href: '/admin/contracts', label: 'contrats', icon: FileText }, 
+        { href: '/admin/tickets', label: 'tickets', icon: Ticket  }, 
         { href: '/admin/users', label: 'Utilisateurs', icon: Users },
         { href: '/admin/logs', label: 'Historique des logs', icon: FileText },
       ]}

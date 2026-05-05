@@ -15,13 +15,40 @@ async function checkAdmin(req: NextRequest) {
   } catch { return null }
 }
 
-// GET — liste tous les users
+// GET — liste tous les users (avec filtre par rôle)
 export async function GET(req: NextRequest) {
   const admin = await checkAdmin(req)
   if (!admin) return NextResponse.json({ error: 'Non autorisé' }, { status: 401 })
 
+  const { searchParams } = new URL(req.url)
+  const role = searchParams.get('role')
+  const search = searchParams.get('search') ?? ''
+
+  // Construire le filtre
+  const where: any = {}
+  
+  // Filtrer par rôle si spécifié
+  if (role === 'CLIENT') {
+    where.userRole = 'CLIENT'
+  } else if (role === 'EMPLOYEE') {
+    where.userRole = 'EMPLOYEE'
+  } else {
+    // Par défaut, retourner les employés (comportement existant)
+    where.userRole = 'EMPLOYEE'
+  }
+
+  // Ajouter la recherche
+  if (search) {
+    where.OR = [
+      { firstName: { contains: search, mode: 'insensitive' } },
+      { lastName: { contains: search, mode: 'insensitive' } },
+      { email: { contains: search, mode: 'insensitive' } },
+      { companyName: { contains: search, mode: 'insensitive' } },
+    ]
+  }
+
   const users = await prisma.user.findMany({
-    where: { userRole: 'EMPLOYEE' },
+    where,
     orderBy: { createdAt: 'desc' },
     select: {
       id: true, firstName: true, lastName: true,

@@ -180,7 +180,8 @@ export default function CheckoutPage() {
     if (!isAuthenticated) return <div className="min-h-screen bg-[#f3f3f5]" />
 
     const profileHref = isAdmin ? '/admin' : '/client/profile'
-    const orderHref = isAdmin ? '/admin/orders' : '/client/orders'
+    const orderHref = isAdmin ? '/admin' : '/client/orders'
+    const ticketsHref = isAdmin ? '/admin' : '/client/tickets'
 
     const renderFormFields = () => {
         const fields = FORM_FIELDS_CONFIG.filter(field => field.section === 'address')
@@ -264,6 +265,9 @@ export default function CheckoutPage() {
                                         </Link>
                                         <Link href={orderHref} onClick={() => setUserMenuOpen(false)} className="flex items-center gap-2 px-4 py-3 text-sm text-[#1a3a52] transition hover:bg-[#f0fdf9]">
                                             Mes commandes
+                                        </Link>
+                                         <Link href={ticketsHref} onClick={() => setUserMenuOpen(false)} className="flex items-center gap-2 px-4 py-3 text-sm text-[#1a3a52] transition hover:bg-[#f0fdf9]">
+                                            Mes Tickets
                                         </Link>
                                         <button onClick={() => { logout(); setUserMenuOpen(false) }} className="flex w-full items-center gap-2 border-t border-[#eef1f5] px-4 py-3 text-sm text-red-500 transition hover:bg-red-50">
                                             Se déconnecter
