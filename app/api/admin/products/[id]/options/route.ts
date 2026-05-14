@@ -7,22 +7,37 @@ interface Params {
   params: Promise<{ id: string }>
 }
 
-export async function GET(request: Request, context: Params) {
-  await requireAdmin(request)
-
+export async function GET(_request: Request, context: Params) {
   const { id } = await context.params
   const productId = Number(id)
-  if (!Number.isInteger(productId)) {
+
+  if (!Number.isInteger(productId) || productId <= 0) {
     return NextResponse.json({ error: 'ID invalide' }, { status: 400 })
   }
 
   const options = await prisma.configurationOption.findMany({
     where: { product_id: productId },
     orderBy: { name: 'asc' },
-    include: { values: { orderBy: { value: 'asc' } } },
+    include: {
+      values: {
+        orderBy: { value: 'asc' },
+        select: { id: true, value: true, price: true, quantity: true },
+      },
+    },
   })
 
-  return NextResponse.json({ options })
+  return NextResponse.json({
+    options: options.map((opt) => ({
+      id: opt.id,
+      name: opt.name,
+      values: opt.values.map((v) => ({
+        id: v.id,
+        value: v.value,
+        price: Number(v.price),
+        quantity: v.quantity,
+      })),
+    })),
+  })
 }
 
 export async function POST(request: Request, context: Params) {

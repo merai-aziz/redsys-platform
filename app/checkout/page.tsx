@@ -20,6 +20,17 @@ function formatCurrency(value: number) {
     return value.toLocaleString('fr-FR', { style: 'currency', currency: 'EUR' })
 }
 
+interface AppNotification {
+    id: string
+    title: string
+    message: string
+    type: string
+    isRead: boolean
+    createdAt: string
+    referenceType?: string
+    referenceId?: string
+}
+
 const FORM_FIELDS_CONFIG = [
     { id: 'email', label: 'Adresse email', type: 'email', required: true, section: 'address', colSpan: 'full' },
     { id: 'company', label: 'Société', type: 'text', required: false, section: 'address', colSpan: 'full' },
@@ -82,6 +93,7 @@ export default function CheckoutPage() {
     const { items, totalPrice, clearCart } = useCart()
     const [userMenuOpen, setUserMenuOpen] = useState(false)
     const userMenuRef = useRef<HTMLDivElement>(null)
+    const [notifications, setNotifications] = useState<AppNotification[]>([])
 
     const [submitting, setSubmitting] = useState(false)
     const [orderSuccess, setOrderSuccess] = useState(false)
@@ -104,6 +116,39 @@ export default function CheckoutPage() {
     const subtotal = totalPrice
     const tax = subtotal * VAT_RATE
     const orderTotal = subtotal + tax + shippingPrice
+
+    // Fetch notifications
+    useEffect(() => {
+        if (!isAuthenticated) return
+        async function fetchNotifications() {
+            try {
+                const res = await fetch('/api/notifications')
+                if (res.ok) {
+                    const data = await res.json()
+                    setNotifications(data.notifications ?? [])
+                }
+            } catch { /* silencieux */ }
+        }
+        void fetchNotifications()
+        const interval = setInterval(fetchNotifications, 30000)
+        return () => clearInterval(interval)
+    }, [isAuthenticated])
+
+    // Total des notifications non lues (tous types confondus)
+    const totalUnreadCount = useMemo(
+        () => notifications.filter((n) => !n.isRead).length,
+        [notifications]
+    )
+
+
+    const orderUnread = useMemo(
+        () => notifications.filter((n) => !n.isRead && (n.type === 'ORDER_STATUS_UPDATE' || n.referenceType === 'ORDER')).length,
+        [notifications]
+    )
+    const ticketUnread = useMemo(
+        () => notifications.filter((n) => !n.isRead && n.referenceType === 'TICKET').length,
+        [notifications]
+    )
 
     useEffect(() => {
         if (!loading && !isAuthenticated) {
@@ -217,15 +262,12 @@ export default function CheckoutPage() {
             <header className="bg-[#1a3a52] shadow-lg">
                 <div className="mx-auto max-w-7xl px-3 sm:px-6 lg:px-8">
 
-                    {/* Ligne principale : logo + user */}
                     <div className="flex h-14 items-center justify-between gap-3 sm:h-16">
 
-                        {/* Logo */}
                         <Link href="/" aria-label="Accueil" className="shrink-0">
                             <Image src="/redsys-logo.png" alt="Redsys" width={120} height={36} className="h-8 w-auto sm:h-10" priority />
                         </Link>
 
-                        {/* Étapes — masquées sur très petit mobile, visibles dès sm */}
                         <div className="hidden items-center gap-2 sm:flex sm:gap-3">
                             {STEPS_CONFIG.map((step, idx) => (
                                 <React.Fragment key={step.number}>
@@ -235,41 +277,53 @@ export default function CheckoutPage() {
                             ))}
                         </div>
 
-                        {/* Droite : retour panier + user */}
                         <div className="flex shrink-0 items-center gap-2">
-                            <Link
-                                href="/cart"
-                                className="hidden items-center gap-1 rounded-full border border-white/20 px-2.5 py-1.5 text-xs font-medium text-white/70 transition hover:bg-white/10 sm:flex"
-                            >
+                            <Link href="/cart" className="hidden items-center gap-1 rounded-full border border-white/20 px-2.5 py-1.5 text-xs font-medium text-white/70 transition hover:bg-white/10 sm:flex">
                                 ← Panier
                             </Link>
 
                             <div ref={userMenuRef} className="relative">
-                                <button
-                                    type="button"
-                                    onClick={() => setUserMenuOpen((v) => !v)}
-                                    className="flex items-center gap-1.5 rounded-full bg-white/10 px-2 py-1.5 transition hover:bg-white/20 sm:px-3"
-                                >
+                                <button type="button" onClick={() => setUserMenuOpen((v) => !v)}
+                                    className="flex items-center gap-1.5 rounded-full bg-white/10 px-2 py-1.5 transition hover:bg-white/20 sm:px-3">
                                     <div className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-[#2ad1a4] text-xs font-black text-[#1a3a52] sm:h-8 sm:w-8 sm:text-sm">
                                         {user?.name?.charAt(0).toUpperCase() || user?.email?.charAt(0).toUpperCase()}
                                     </div>
                                     <span className="hidden max-w-[90px] truncate text-xs font-semibold text-white sm:inline sm:max-w-[120px] sm:text-sm">
                                         {user?.name || user?.email}
                                     </span>
+                                    {totalUnreadCount > 0 && (
+                                        <span className="ml-1 flex h-5 min-w-5 items-center justify-center rounded-full bg-red-500 px-1 text-[10px] font-black text-white shadow-md">
+                                            {totalUnreadCount > 99 ? '99+' : totalUnreadCount}
+                                        </span>
+                                    )}
                                 </button>
 
                                 {userMenuOpen && (
-                                    <div className="absolute right-0 top-full z-50 mt-2 w-44 overflow-hidden rounded-xl border border-[#d0d9e3] bg-white shadow-xl sm:w-48">
-                                        <Link href={profileHref} onClick={() => setUserMenuOpen(false)} className="flex items-center gap-2 px-4 py-3 text-sm text-[#1a3a52] transition hover:bg-[#f0fdf9]">
+                                    <div className="absolute right-0 top-full z-50 mt-2 w-44 overflow-hidden rounded-xl border border-[#d0d9e3] bg-white shadow-xl sm:w-52">
+                                        <Link href={profileHref} onClick={() => setUserMenuOpen(false)}
+                                            className="flex items-center gap-2 px-4 py-3 text-sm text-[#1a3a52] transition hover:bg-[#f0fdf9]">
                                             Mon profil
                                         </Link>
-                                        <Link href={orderHref} onClick={() => setUserMenuOpen(false)} className="flex items-center gap-2 px-4 py-3 text-sm text-[#1a3a52] transition hover:bg-[#f0fdf9]">
-                                            Mes commandes
+                                        <Link href={orderHref} onClick={() => setUserMenuOpen(false)}
+                                            className="flex items-center justify-between px-4 py-3 text-sm text-[#1a3a52] transition hover:bg-[#f0fdf9]">
+                                            <span>Mes commandes</span>
+                                            {orderUnread > 0 && (
+                                                <span className="rounded-full bg-red-100 px-1.5 py-0.5 text-[10px] font-bold text-red-600">
+                                                    {orderUnread}
+                                                </span>
+                                            )}
                                         </Link>
-                                         <Link href={ticketsHref} onClick={() => setUserMenuOpen(false)} className="flex items-center gap-2 px-4 py-3 text-sm text-[#1a3a52] transition hover:bg-[#f0fdf9]">
-                                            Mes Tickets
+                                        <Link href={ticketsHref} onClick={() => setUserMenuOpen(false)}
+                                            className="flex items-center justify-between px-4 py-3 text-sm text-[#1a3a52] transition hover:bg-[#f0fdf9]">
+                                            <span>Mes Tickets</span>
+                                            {ticketUnread > 0 && (
+                                                <span className="rounded-full bg-red-100 px-1.5 py-0.5 text-[10px] font-bold text-red-600">
+                                                    {ticketUnread}
+                                                </span>
+                                            )}
                                         </Link>
-                                        <button onClick={() => { logout(); setUserMenuOpen(false) }} className="flex w-full items-center gap-2 border-t border-[#eef1f5] px-4 py-3 text-sm text-red-500 transition hover:bg-red-50">
+                                        <button onClick={() => { logout(); setUserMenuOpen(false) }}
+                                            className="flex w-full items-center gap-2 border-t border-[#eef1f5] px-4 py-3 text-sm text-red-500 transition hover:bg-red-50">
                                             Se déconnecter
                                         </button>
                                     </div>
@@ -278,7 +332,6 @@ export default function CheckoutPage() {
                         </div>
                     </div>
 
-                    {/* Étapes sur mobile — affichées en dessous sur xs */}
                     <div className="flex items-center justify-center gap-2 pb-2 sm:hidden">
                         {STEPS_CONFIG.map((step, idx) => (
                             <React.Fragment key={step.number}>
@@ -296,10 +349,8 @@ export default function CheckoutPage() {
                     Commander
                 </h1>
 
-                {/* Grid : colonne unique sur mobile, deux colonnes sur lg */}
                 <div className="grid gap-5 lg:grid-cols-[minmax(0,1fr)_360px] lg:gap-6 xl:grid-cols-[minmax(0,1fr)_380px]">
 
-                    {/* ── COLONNE GAUCHE : accordéons ── */}
                     <section className="space-y-3 sm:space-y-4">
                         {SECTIONS_CONFIG.map((section) => (
                             <AccordionSection
@@ -320,17 +371,13 @@ export default function CheckoutPage() {
                                     <div className="grid grid-cols-1 gap-3 sm:gap-4">
                                         {renderFormFields()}
                                         <label className="inline-flex items-center gap-2 text-sm text-[#37495f]">
-                                            <input
-                                                type="checkbox"
-                                                checked={formData.neutralDelivery}
+                                            <input type="checkbox" checked={formData.neutralDelivery}
                                                 onChange={(e) => setFormData(p => ({ ...p, neutralDelivery: e.target.checked }))}
-                                                className="h-4 w-4 rounded border-[#bfc6d1]"
-                                            />
+                                                className="h-4 w-4 rounded border-[#bfc6d1]" />
                                             Bon de livraison neutre
                                         </label>
                                     </div>
                                 )}
-
                                 {section.id === 'shipping' && (
                                     <ChoiceBlockInline
                                         title="Modes de livraison"
@@ -344,7 +391,6 @@ export default function CheckoutPage() {
                                         onChange={(value) => setShippingMethod(value as ShippingMethod)}
                                     />
                                 )}
-
                                 {section.id === 'payment' && (
                                     <ChoiceBlockInline
                                         title="Modes de paiement"
@@ -361,16 +407,11 @@ export default function CheckoutPage() {
                         ))}
                     </section>
 
-                    {/* ── COLONNE DROITE : résumé commande ── */}
-                    {/* Sur mobile : affiché EN DESSOUS des accordéons naturellement */}
-                    {/* Sur lg : sticky à droite */}
                     <aside className="h-fit rounded-xl border border-[#d6d8dc] bg-white lg:sticky lg:top-4">
                         <div className="bg-[#1a3a52] px-4 py-3 text-base font-bold text-white sm:px-5 sm:text-lg">
                             Résumé de la commande
                         </div>
                         <div className="space-y-4 p-4 sm:space-y-5 sm:p-5">
-
-                            {/* Articles */}
                             {items.length === 0 ? (
                                 <div className="py-6 text-center text-sm text-gray-500">Votre panier est vide</div>
                             ) : (
@@ -417,7 +458,6 @@ export default function CheckoutPage() {
                                 </div>
                             )}
 
-                            {/* Totaux */}
                             <div className="border-t border-[#e2e7ed] pt-3 text-sm">
                                 <div className="flex items-center justify-between py-1.5">
                                     <span className="text-[#5a7a9a]">Sous-total HT</span>
@@ -437,31 +477,21 @@ export default function CheckoutPage() {
                                 </div>
                             </div>
 
-                            {/* Code promo */}
                             <div className="flex gap-2">
-                                <input
-                                    type="text"
-                                    placeholder="Code de réduction"
-                                    className="h-10 min-w-0 flex-1 rounded border border-[#bfc6d1] px-3 text-sm outline-none focus:ring-2 focus:ring-[#2ad1a4]/40 sm:h-11"
-                                />
+                                <input type="text" placeholder="Code de réduction"
+                                    className="h-10 min-w-0 flex-1 rounded border border-[#bfc6d1] px-3 text-sm outline-none focus:ring-2 focus:ring-[#2ad1a4]/40 sm:h-11" />
                                 <button type="button" className="h-10 rounded bg-[#e6eaef] px-3 text-sm font-semibold text-[#1a3a52] transition hover:bg-[#dce3eb] sm:h-11 sm:px-4">
                                     Appliquer
                                 </button>
                             </div>
 
-                            {/* Newsletter */}
                             <label className="inline-flex items-center gap-2 text-xs text-[#42566f] sm:text-sm">
                                 <input type="checkbox" defaultChecked className="h-4 w-4 rounded border-[#bfc6d1]" />
                                 S&apos;abonner à la newsletter
                             </label>
 
-                            {/* Bouton commander */}
-                            <button
-                                type="button"
-                                onClick={handleSubmitOrder}
-                                disabled={submitting || items.length === 0}
-                                className="flex h-11 w-full items-center justify-center gap-2 rounded-xl bg-[#2ad1a4] text-sm font-bold text-[#1a3a52] shadow-md transition hover:bg-[#20b890] hover:shadow-lg disabled:cursor-not-allowed disabled:opacity-60 sm:h-12 sm:text-base"
-                            >
+                            <button type="button" onClick={handleSubmitOrder} disabled={submitting || items.length === 0}
+                                className="flex h-11 w-full items-center justify-center gap-2 rounded-xl bg-[#2ad1a4] text-sm font-bold text-[#1a3a52] shadow-md transition hover:bg-[#20b890] hover:shadow-lg disabled:cursor-not-allowed disabled:opacity-60 sm:h-12 sm:text-base">
                                 {submitting ? (
                                     <>
                                         <div className="h-4 w-4 animate-spin rounded-full border-2 border-[#1a3a52]/30 border-t-[#1a3a52]" />
@@ -475,7 +505,6 @@ export default function CheckoutPage() {
                                 )}
                             </button>
 
-                            {/* Aide */}
                             <div className="rounded-lg border border-[#d6d8dc] p-3 text-[#1a3a52] sm:p-4">
                                 <h3 className="text-sm font-semibold sm:text-base">Avez-vous besoin d&apos;aide ?</h3>
                                 <div className="mt-3 space-y-1.5 text-xs sm:text-sm">
@@ -484,14 +513,11 @@ export default function CheckoutPage() {
                                 </div>
                                 <div className="mt-3 flex flex-wrap gap-3 text-xs text-[#667a92]">
                                     {FOOTER_LINKS.map((link) => (
-                                        <Link key={link.label} href={link.href} className="hover:text-[#1a3a52]">
-                                            {link.label}
-                                        </Link>
+                                        <Link key={link.label} href={link.href} className="hover:text-[#1a3a52]">{link.label}</Link>
                                     ))}
                                 </div>
                             </div>
 
-                            {/* Badges sécurité */}
                             <div className="flex flex-wrap items-center gap-3 text-xs text-[#607286]">
                                 <span className="inline-flex items-center gap-1">🔒 SSL 256-bit</span>
                                 <span className="inline-flex items-center gap-1">🛡 Données protégées</span>
@@ -515,11 +541,9 @@ function Field({ label, type = 'text', required, placeholder, defaultValue, valu
             <span className="mb-1 block text-xs font-medium text-[#37495f] sm:mb-1.5 sm:text-sm">
                 {label}{required && <span className="ml-0.5 text-red-500">*</span>}
             </span>
-            <input
-                type={type} placeholder={placeholder} defaultValue={defaultValue} value={value}
+            <input type={type} placeholder={placeholder} defaultValue={defaultValue} value={value}
                 onChange={(e) => onChange?.(e.target.value)}
-                className="h-10 w-full rounded-lg border border-[#bfc6d1] bg-white px-3 text-sm text-[#1a3a52] outline-none transition focus:border-[#2ad1a4] focus:ring-2 focus:ring-[#2ad1a4]/20 sm:h-11"
-            />
+                className="h-10 w-full rounded-lg border border-[#bfc6d1] bg-white px-3 text-sm text-[#1a3a52] outline-none transition focus:border-[#2ad1a4] focus:ring-2 focus:ring-[#2ad1a4]/20 sm:h-11" />
         </label>
     )
 }

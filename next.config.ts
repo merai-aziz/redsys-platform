@@ -2,7 +2,7 @@ import type { NextConfig } from "next";
 
 const nextConfig: NextConfig = {
   // Allow this host to access Next.js dev resources during development
-  allowedDevOrigins: ["192.168.0.134"],
+  allowedDevOrigins: ["192.168.229.58"],
   images: {
     remotePatterns: [
       {
@@ -13,6 +13,13 @@ const nextConfig: NextConfig = {
         protocol: "https",
         hostname: "WWW.renewtech.fr",
       },
+
+     {
+        protocol: "https",
+        hostname: "w7.pngwing.com",
+      },
+      
+
     ],
   },
 };

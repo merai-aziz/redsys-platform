@@ -6,31 +6,69 @@ import { SignJWT } from 'jose'
 const accessSecret = new TextEncoder().encode(process.env.JWT_ACCESS_SECRET!)
 const refreshSecret = new TextEncoder().encode(process.env.JWT_REFRESH_SECRET!)
 
+// ── Rate limiting ────────────────────────────────────────────────────────────
+const loginAttempts = new Map<string, { count: number; firstAttempt: number }>()
+const MAX_ATTEMPTS = 5
+const WINDOW_MS = 15 * 60 * 1000 // 15 minutes
+
+function isRateLimited(ip: string): boolean {
+  const now = Date.now()
+  const entry = loginAttempts.get(ip)
+
+  if (!entry) {
+    loginAttempts.set(ip, { count: 1, firstAttempt: now })
+    return false
+  }
+
+  if (now - entry.firstAttempt > WINDOW_MS) {
+    loginAttempts.set(ip, { count: 1, firstAttempt: now })
+    return false
+  }
+
+  if (entry.count >= MAX_ATTEMPTS) return true
+
+  entry.count++
+  return false
+}
+
+function resetAttempts(ip: string) {
+  loginAttempts.delete(ip)
+}
+// ─────────────────────────────────────────────────────────────────────────────
+
 export async function POST(req: NextRequest) {
-try {
-  const body = await req.json()
-  console.log('BODY RECU:', body)
-  
-  const { email, password } = body
+  try {
+    const ip = req.headers.get('x-forwarded-for') || 'unknown'
 
-  const user = await prisma.user.findUnique({ where: { email } })
-  console.log('USER:', user?.email, '| ACTIVE:', user?.isActive, '| ROLE:', user?.userRole)
+    if (isRateLimited(ip)) {
+      return NextResponse.json(
+        { error: 'Trop de tentatives, réessayez dans 15 minutes.' },
+        { status: 429 }
+      )
+    }
 
-  if (!user) {
-    console.log('USER NOT FOUND')
-    return NextResponse.json({ error: 'Identifiants invalides' }, { status: 401 })
-  }
+    const body = await req.json()
+    console.log('BODY RECU:', body)
 
-  if (!user.isActive) {
-    console.log('USER INACTIVE')
-    return NextResponse.json({ error: 'Compte désactivé' }, { status: 403 })
-  }
+    const { email, password } = body
 
-  const isValid = await bcrypt.compare(password, user.password)
-  console.log('PASSWORD VALID:', isValid)
+    const user = await prisma.user.findUnique({ where: { email } })
+    console.log('USER:', user?.email, '| ACTIVE:', user?.isActive, '| ROLE:', user?.userRole)
+
+    if (!user) {
+      console.log('USER NOT FOUND')
+      return NextResponse.json({ error: 'Identifiants invalides' }, { status: 401 })
+    }
+
+    if (!user.isActive) {
+      console.log('USER INACTIVE')
+      return NextResponse.json({ error: 'Compte désactivé' }, { status: 403 })
+    }
+
+    const isValid = await bcrypt.compare(password, user.password)
+    console.log('PASSWORD VALID:', isValid)
 
     // Log de connexion
-    const ip = req.headers.get('x-forwarded-for') || 'unknown'
     const device = req.headers.get('user-agent') || 'unknown'
 
     await prisma.loginLog.create({
@@ -45,6 +83,9 @@ try {
     if (!isValid) {
       return NextResponse.json({ error: 'Identifiants invalides' }, { status: 401 })
     }
+
+    // Login réussi → reset compteur
+    resetAttempts(ip)
 
     // Créer les tokens
     const payload = { userId: user.id, email: user.email, role: user.userRole }
@@ -91,14 +132,14 @@ try {
       httpOnly: true,
       secure: process.env.NODE_ENV === 'production',
       sameSite: 'lax',
-      maxAge: 60 * 60, // 1h
+      maxAge: 60 * 60,
     })
 
     response.cookies.set('refresh_token', refreshToken, {
       httpOnly: true,
       secure: process.env.NODE_ENV === 'production',
       sameSite: 'lax',
-      maxAge: 7 * 24 * 60 * 60, // 7 jours
+      maxAge: 7 * 24 * 60 * 60,
     })
 
     return response

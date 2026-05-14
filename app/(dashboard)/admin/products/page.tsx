@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { toast } from 'sonner'
 
 import { Button } from '@/components/ui/button'
@@ -17,11 +17,6 @@ interface Family { id: number; name: string; category_id: number }
 interface Filter {
   id: number
   name: string
-}
-
-interface SparepartDomainFilterDefinition {
-  domainCode: string
-  filters: Array<{ id: number; name: string }>
 }
 
 interface Product {
@@ -43,13 +38,8 @@ interface Product {
     name: string
     values: Array<{ id: number; value: string; price: string; quantity: number }>
   }>
-  compatibilities_as_part?: Array<{
-    target_product_id: number
-  }>
-  sparepart_filters_as_part?: Array<{
-    target_product_id: number
-    filter_id: number
-  }>
+  compatibilities_as_part?: Array<{ target_product_id: number }>
+  sparepart_filters_as_part?: Array<{ target_product_id: number; filter_id: number }>
 }
 
 const emptyForm = {
@@ -66,11 +56,181 @@ const emptyForm = {
   family_id: '',
 }
 
-const SPAREPART_DOMAIN_OPTIONS = [
-  { code: 'SERVER', label: 'Serveur' },
-  { code: 'STORAGE', label: 'Storage' },
-  { code: 'NETWORK', label: 'Reseau' },
-] as const
+// ─── ImageUploadField ────────────────────────────────────────────────────────
+
+interface ImageUploadFieldProps {
+  value: string
+  onChange: (url: string) => void
+}
+
+function ImageUploadField({ value, onChange }: ImageUploadFieldProps) {
+  const inputRef = useRef<HTMLInputElement>(null)
+  const [uploading, setUploading] = useState(false)
+  const [dragOver, setDragOver] = useState(false)
+  const [tab, setTab] = useState<'upload' | 'url'>('upload')
+
+  const previewSrc = value.trim() || null
+
+  async function handleFile(file: File) {
+    const allowed = ['image/jpeg', 'image/png', 'image/webp', 'image/gif', 'image/svg+xml']
+    if (!allowed.includes(file.type)) {
+      toast.error('Format non supporté. Utilisez JPG, PNG, WEBP, GIF ou SVG.')
+      return
+    }
+    if (file.size > 5 * 1024 * 1024) {
+      toast.error('Image trop volumineuse (max 5 Mo).')
+      return
+    }
+
+    setUploading(true)
+    try {
+      const fd = new FormData()
+      fd.append('file', file)
+      fd.append('context', 'products')
+
+      const res = await fetch('/api/admin/upload', { method: 'POST', body: fd })
+      const data = await res.json() as { fileUrl?: string; error?: string }
+
+      if (!res.ok || !data.fileUrl) {
+        toast.error(data.error ?? "Erreur lors de l'upload")
+        return
+      }
+
+      onChange(data.fileUrl)
+      toast.success('Image uploadée avec succès')
+    } catch {
+      toast.error("Erreur réseau lors de l'upload")
+    } finally {
+      setUploading(false)
+    }
+  }
+
+  function onFileInput(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0]
+    if (file) void handleFile(file)
+    e.target.value = ''
+  }
+
+  function onDrop(e: React.DragEvent) {
+    e.preventDefault()
+    setDragOver(false)
+    const file = e.dataTransfer.files[0]
+    if (file) void handleFile(file)
+  }
+
+  function onDragOver(e: React.DragEvent) {
+    e.preventDefault()
+    setDragOver(true)
+  }
+
+  return (
+    <div className="space-y-2">
+      <div className="flex gap-1 rounded-lg border border-slate-200 bg-slate-50 p-1 w-fit">
+        <button
+          type="button"
+          onClick={() => setTab('upload')}
+          className={`rounded-md px-3 py-1 text-xs font-medium transition ${
+            tab === 'upload'
+              ? 'bg-white text-slate-900 shadow-sm'
+              : 'text-slate-500 hover:text-slate-700'
+          }`}
+        >
+          📁 Depuis le PC
+        </button>
+        <button
+          type="button"
+          onClick={() => setTab('url')}
+          className={`rounded-md px-3 py-1 text-xs font-medium transition ${
+            tab === 'url'
+              ? 'bg-white text-slate-900 shadow-sm'
+              : 'text-slate-500 hover:text-slate-700'
+          }`}
+        >
+          🔗 URL externe
+        </button>
+      </div>
+
+      {tab === 'upload' && (
+        <div
+          onDrop={onDrop}
+          onDragOver={onDragOver}
+          onDragLeave={() => setDragOver(false)}
+          onClick={() => inputRef.current?.click()}
+          className={`
+            relative flex flex-col items-center justify-center gap-2 rounded-lg border-2 border-dashed
+            cursor-pointer p-6 text-center transition
+            ${dragOver
+              ? 'border-[#2ad1a4] bg-[#f0fdf9]'
+              : 'border-slate-200 bg-slate-50 hover:border-slate-300 hover:bg-slate-100'
+            }
+            ${uploading ? 'pointer-events-none opacity-60' : ''}
+          `}
+        >
+          <input
+            ref={inputRef}
+            type="file"
+            accept="image/jpeg,image/png,image/webp,image/gif,image/svg+xml"
+            className="hidden"
+            onChange={onFileInput}
+          />
+
+          {uploading ? (
+            <>
+              <div className="h-8 w-8 animate-spin rounded-full border-4 border-slate-200 border-t-[#2ad1a4]" />
+              <p className="text-sm text-slate-500">Upload en cours…</p>
+            </>
+          ) : (
+            <>
+              <div className="text-3xl">🖼️</div>
+              <div>
+                <p className="text-sm font-medium text-slate-700">
+                  Glissez une image ici ou <span className="text-[#2ad1a4] underline">cliquez pour parcourir</span>
+                </p>
+                <p className="mt-1 text-xs text-slate-400">JPG, PNG, WEBP, GIF, SVG — max 5 Mo</p>
+              </div>
+            </>
+          )}
+        </div>
+      )}
+
+      {tab === 'url' && (
+        <Input
+          value={value}
+          onChange={(e) => onChange(e.target.value)}
+          placeholder="https://example.com/image.jpg"
+        />
+      )}
+
+      {previewSrc && (
+        <div className="relative flex items-start gap-3 rounded-lg border border-slate-200 bg-white p-2">
+          {/* eslint-disable-next-line @next/next/no-img-element */}
+          <img
+            src={previewSrc}
+            alt="Aperçu"
+            className="h-20 w-20 rounded object-cover border border-slate-100"
+            onError={(e) => {
+              (e.currentTarget as HTMLImageElement).style.display = 'none'
+            }}
+          />
+          <div className="flex-1 min-w-0">
+            <p className="text-xs font-medium text-slate-600 mb-0.5">Image actuelle</p>
+            <p className="text-xs text-slate-400 break-all line-clamp-2">{previewSrc}</p>
+          </div>
+          <button
+            type="button"
+            onClick={() => onChange('')}
+            className="shrink-0 rounded-full p-1 text-slate-400 hover:bg-slate-100 hover:text-slate-600 transition"
+            title="Supprimer l'image"
+          >
+            ✕
+          </button>
+        </div>
+      )}
+    </div>
+  )
+}
+
+// ─── Main page ────────────────────────────────────────────────────────────────
 
 export default function AdminProductsPage() {
   const [products, setProducts] = useState<Product[]>([])
@@ -97,11 +257,7 @@ export default function AdminProductsPage() {
     async function safeJson(response: Response) {
       const text = await response.text()
       if (!text) return null
-      try {
-        return JSON.parse(text) as Record<string, unknown>
-      } catch {
-        return null
-      }
+      try { return JSON.parse(text) as Record<string, unknown> } catch { return null }
     }
 
     const [productsRes, brandsRes, categoriesRes, familiesRes, filtersRes] = await Promise.all([
@@ -128,7 +284,6 @@ export default function AdminProductsPage() {
         (familiesJson as { error?: string } | null)?.error,
         (filtersJson as { error?: string } | null)?.error,
       ].find(Boolean)
-
       toast.error(errorMessage || 'Chargement des donnees impossible')
       return
     }
@@ -142,37 +297,25 @@ export default function AdminProductsPage() {
 
   useEffect(() => {
     let ignore = false
-
-    async function bootstrap() {
-      if (!ignore) {
-        await loadAll()
-      }
-    }
-
+    async function bootstrap() { if (!ignore) await loadAll() }
     void bootstrap()
-
-    return () => {
-      ignore = true
-    }
+    return () => { ignore = true }
   }, [])
 
   const visibleFamilies = useMemo(() => {
     const categoryId = Number(form.category_id)
     if (!Number.isInteger(categoryId)) return []
-    return families.filter((family) => family.category_id === categoryId)
+    return families.filter((f) => f.category_id === categoryId)
   }, [families, form.category_id])
 
   const selectedFamilyRecord = useMemo(
-    () => families.find((family) => String(family.id) === form.family_id) ?? null,
+    () => families.find((f) => String(f.id) === form.family_id) ?? null,
     [families, form.family_id],
   )
 
   const isSparePartSelection = useMemo(() => {
     if (!selectedFamilyRecord) return false
-    const normalized = selectedFamilyRecord.name
-      .toLowerCase()
-      .normalize('NFD')
-      .replace(/[\u0300-\u036f]/g, '')
+    const normalized = selectedFamilyRecord.name.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '')
     return normalized.includes('piece') || normalized.includes('detache')
   }, [selectedFamilyRecord])
 
@@ -185,11 +328,11 @@ export default function AdminProductsPage() {
   const compatibleModelChoices = useMemo(() => {
     const q = compatibleSearch.trim().toLowerCase()
     return products
-      .filter((product) => product.type === 'CONFIGURABLE')
-      .filter((product) => (editingId ? product.id !== editingId : true))
-      .filter((product) => {
+      .filter((p) => p.type === 'CONFIGURABLE')
+      .filter((p) => (editingId ? p.id !== editingId : true))
+      .filter((p) => {
         if (!q) return true
-        const haystack = `${product.name} ${product.brand.name} ${product.family.name} ${product.category.name}`.toLowerCase()
+        const haystack = `${p.name} ${p.brand.name} ${p.family.name} ${p.category.name}`.toLowerCase()
         return haystack.includes(q)
       })
       .sort((a, b) => a.name.localeCompare(b.name))
@@ -223,22 +366,22 @@ export default function AdminProductsPage() {
     })
     setSpecRows(
       product.specs.length > 0
-        ? product.specs.map((spec) => ({ key: spec.spec_key, value: spec.spec_value }))
+        ? product.specs.map((s) => ({ key: s.spec_key, value: s.spec_value }))
         : [{ key: '', value: '' }],
     )
 
     const preloadedIds = Array.isArray(product.compatibilities_as_part)
-      ? product.compatibilities_as_part.map((entry) => entry.target_product_id)
+      ? product.compatibilities_as_part.map((e) => e.target_product_id)
       : []
     setCompatibleModelIds(preloadedIds)
     setCompatibleSearch('')
 
     const assignments = Array.isArray(product.sparepart_filters_as_part)
-      ? product.sparepart_filters_as_part.reduce<Record<number, number[]>>((acc, entry) => {
-        const current = acc[entry.target_product_id] ?? []
-        acc[entry.target_product_id] = Array.from(new Set([...current, entry.filter_id]))
-        return acc
-      }, {})
+      ? product.sparepart_filters_as_part.reduce<Record<number, number[]>>((acc, e) => {
+          const current = acc[e.target_product_id] ?? []
+          acc[e.target_product_id] = Array.from(new Set([...current, e.filter_id]))
+          return acc
+        }, {})
       : {}
     setSparepartFilterAssignments(assignments)
     setSparepartTargetId(preloadedIds[0] ?? (Object.keys(assignments)[0] ? Number(Object.keys(assignments)[0]) : null))
@@ -247,10 +390,10 @@ export default function AdminProductsPage() {
     if (compatRes.ok) {
       const compatJson = await compatRes.json().catch(() => null)
       const ids = Array.isArray(compatJson?.compatibleProductIds)
-        ? compatJson.compatibleProductIds.filter((value: unknown): value is number => Number.isInteger(value))
+        ? compatJson.compatibleProductIds.filter((v: unknown): v is number => Number.isInteger(v))
         : []
       setCompatibleModelIds(ids)
-      setSparepartTargetId((current) => (current && ids.includes(current) ? current : ids[0] ?? null))
+      setSparepartTargetId((cur) => (cur && ids.includes(cur) ? cur : ids[0] ?? null))
     }
 
     setShowDialog(true)
@@ -264,7 +407,7 @@ export default function AdminProductsPage() {
       brand_id: Number(form.brand_id),
       category_id: Number(form.category_id),
       family_id: Number(form.family_id),
-      specs: form.type === 'STANDARD' ? specRows.filter((entry) => entry.key.trim() && entry.value.trim()) : [],
+      specs: form.type === 'STANDARD' ? specRows.filter((e) => e.key.trim() && e.value.trim()) : [],
       compatible_product_ids: form.type === 'STANDARD' && isSparePartSelection ? compatibleModelIds : [],
       sparepart_filters: form.type === 'STANDARD' && isSparePartSelection
         ? Object.entries(sparepartFilterAssignments).map(([targetProductId, filterIds]) => ({
@@ -289,34 +432,31 @@ export default function AdminProductsPage() {
       return
     }
 
-    toast.success(editingId ? 'Produit modifie' : 'Produit cree')
+    toast.success(editingId ? 'Produit modifié' : 'Produit créé')
     setShowDialog(false)
     await loadAll()
   }
 
   async function removeProduct(product: Product) {
     if (!confirm(`Supprimer ${product.name} ?`)) return
-
     const res = await fetch(`/api/admin/products/${product.id}`, { method: 'DELETE' })
     if (!res.ok) {
       const data = await res.json().catch(() => null)
       toast.error(data?.error || 'Suppression impossible')
       return
     }
-
-    toast.success('Produit supprime')
+    toast.success('Produit supprimé')
     await loadAll()
   }
 
   async function addOption() {
     if (!optionDialogProduct || !optionName.trim()) return
-
     const cleanedValues = optionValues
-      .filter((entry) => entry.value.trim())
-      .map((entry) => ({
-        value: entry.value.trim(),
-        price: Number(entry.price || 0),
-        quantity: Math.max(1, Math.trunc(Number(entry.quantity || 1))),
+      .filter((e) => e.value.trim())
+      .map((e) => ({
+        value: e.value.trim(),
+        price: Number(e.price || 0),
+        quantity: Math.max(1, Math.trunc(Number(e.quantity || 1))),
       }))
 
     const res = await fetch(
@@ -332,11 +472,11 @@ export default function AdminProductsPage() {
 
     if (!res.ok) {
       const data = await res.json().catch(() => null)
-      toast.error(data?.error || 'Creation option impossible')
+      toast.error(data?.error || 'Création option impossible')
       return
     }
 
-    toast.success(editingOptionId ? 'Option modifiee' : 'Option ajoutee')
+    toast.success(editingOptionId ? 'Option modifiée' : 'Option ajoutée')
     setEditingOptionId(null)
     setOptionName('')
     setOptionValues([{ value: '', price: '0', quantity: '1' }])
@@ -348,26 +488,20 @@ export default function AdminProductsPage() {
     setOptionName(option.name)
     setOptionValues(
       option.values.length > 0
-        ? option.values.map((value) => ({ value: value.value, price: String(value.price), quantity: String(value.quantity ?? 1) }))
+        ? option.values.map((v) => ({ value: v.value, price: String(v.price), quantity: String(v.quantity ?? 1) }))
         : [{ value: '', price: '0', quantity: '1' }],
     )
   }
 
   async function deleteOption(optionId: number) {
-    if (!optionDialogProduct) return
-    if (!confirm('Supprimer cette option ?')) return
-
-    const res = await fetch(`/api/admin/products/${optionDialogProduct.id}/options/${optionId}`, {
-      method: 'DELETE',
-    })
-
+    if (!optionDialogProduct || !confirm('Supprimer cette option ?')) return
+    const res = await fetch(`/api/admin/products/${optionDialogProduct.id}/options/${optionId}`, { method: 'DELETE' })
     if (!res.ok) {
       const data = await res.json().catch(() => null)
       toast.error(data?.error || 'Suppression option impossible')
       return
     }
-
-    toast.success('Option supprimee')
+    toast.success('Option supprimée')
     if (editingOptionId === optionId) {
       setEditingOptionId(null)
       setOptionName('')
@@ -406,7 +540,20 @@ export default function AdminProductsPage() {
             <TableBody>
               {products.map((product) => (
                 <TableRow key={product.id}>
-                  <TableCell className="font-medium">{product.name}</TableCell>
+                  <TableCell className="font-medium">
+                    <div className="flex items-center gap-2">
+                      {product.image_url && (
+                        // eslint-disable-next-line @next/next/no-img-element
+                        <img
+                          src={product.image_url}
+                          alt={product.name}
+                          className="h-8 w-8 rounded object-cover border border-slate-100 shrink-0"
+                          onError={(e) => { (e.currentTarget as HTMLImageElement).style.display = 'none' }}
+                        />
+                      )}
+                      {product.name}
+                    </div>
+                  </TableCell>
                   <TableCell>{product.type}</TableCell>
                   <TableCell>
                     <p>{product.brand.name}</p>
@@ -421,8 +568,7 @@ export default function AdminProductsPage() {
                     <div className="flex justify-end gap-2">
                       <Button variant="outline" size="sm" onClick={() => openEdit(product)}>Modifier</Button>
                       <Button
-                        variant="outline"
-                        size="sm"
+                        variant="outline" size="sm"
                         disabled={product.type !== 'CONFIGURABLE'}
                         onClick={() => setOptionDialogProduct(product)}
                       >
@@ -438,6 +584,7 @@ export default function AdminProductsPage() {
         </CardContent>
       </Card>
 
+      {/* ── Dialog création/édition produit ───────────────────────────────── */}
       <Dialog open={showDialog} onOpenChange={setShowDialog}>
         <DialogContent className="max-h-[90vh] overflow-y-auto sm:max-w-2xl">
           <DialogHeader>
@@ -450,16 +597,14 @@ export default function AdminProductsPage() {
           <div className="grid gap-4 sm:grid-cols-2">
             <div className="space-y-2 sm:col-span-2">
               <Label>Nom</Label>
-              <Input value={form.name} onChange={(e) => setForm((prev) => ({ ...prev, name: e.target.value }))} />
+              <Input value={form.name} onChange={(e) => setForm((p) => ({ ...p, name: e.target.value }))} />
             </div>
 
             <div className="space-y-2">
               <Label>Prix de base</Label>
               <Input
-                type="number"
-                step="0.01"
-                value={form.base_price}
-                onChange={(e) => setForm((prev) => ({ ...prev, base_price: e.target.value }))}
+                type="number" step="0.01" value={form.base_price}
+                onChange={(e) => setForm((p) => ({ ...p, base_price: e.target.value }))}
               />
             </div>
 
@@ -468,22 +613,19 @@ export default function AdminProductsPage() {
               <select
                 className="h-10 w-full rounded border border-slate-200 bg-white px-3 text-sm"
                 value={form.type}
-                onChange={(e) => {
-                  const nextType = e.target.value as 'STANDARD' | 'CONFIGURABLE'
-                  setForm((prev) => ({ ...prev, type: nextType }))
-                }}
+                onChange={(e) => setForm((p) => ({ ...p, type: e.target.value as 'STANDARD' | 'CONFIGURABLE' }))}
               >
                 <option value="STANDARD">STANDARD</option>
                 <option value="CONFIGURABLE">CONFIGURABLE</option>
               </select>
             </div>
 
+            {/* ── Image upload ── */}
             <div className="space-y-2 sm:col-span-2">
-              <Label>Image URL</Label>
-              <Input
+              <Label>Image du produit</Label>
+              <ImageUploadField
                 value={form.image_url}
-                onChange={(e) => setForm((prev) => ({ ...prev, image_url: e.target.value }))}
-                placeholder="https://..."
+                onChange={(url) => setForm((p) => ({ ...p, image_url: url }))}
               />
             </div>
 
@@ -492,37 +634,33 @@ export default function AdminProductsPage() {
               <textarea
                 className="min-h-20 w-full rounded border border-slate-200 bg-white px-3 py-2 text-sm"
                 value={form.description}
-                onChange={(e) => setForm((prev) => ({ ...prev, description: e.target.value }))}
+                onChange={(e) => setForm((p) => ({ ...p, description: e.target.value }))}
                 placeholder="Description détaillée du produit (optionnel)"
               />
             </div>
 
             <div className="space-y-2">
-              <Label>Quantite stock</Label>
+              <Label>Quantité stock</Label>
               <Input
-                type="number"
-                min="0"
-                value={form.stock_qty}
-                onChange={(e) => setForm((prev) => ({ ...prev, stock_qty: e.target.value }))}
+                type="number" min="0" value={form.stock_qty}
+                onChange={(e) => setForm((p) => ({ ...p, stock_qty: e.target.value }))}
               />
             </div>
 
             <div className="space-y-2">
-              <Label>Disponibilite</Label>
+              <Label>Disponibilité</Label>
               <div className="flex h-10 items-center gap-5 rounded border border-slate-200 bg-white px-3 text-sm">
                 <label className="flex items-center gap-2">
                   <input
-                    type="checkbox"
-                    checked={form.in_stock}
-                    onChange={(e) => setForm((prev) => ({ ...prev, in_stock: e.target.checked }))}
+                    type="checkbox" checked={form.in_stock}
+                    onChange={(e) => setForm((p) => ({ ...p, in_stock: e.target.checked }))}
                   />
                   En stock
                 </label>
                 <label className="flex items-center gap-2">
                   <input
-                    type="checkbox"
-                    checked={form.poe}
-                    onChange={(e) => setForm((prev) => ({ ...prev, poe: e.target.checked }))}
+                    type="checkbox" checked={form.poe}
+                    onChange={(e) => setForm((p) => ({ ...p, poe: e.target.checked }))}
                   />
                   PoE
                 </label>
@@ -534,12 +672,10 @@ export default function AdminProductsPage() {
               <select
                 className="h-10 w-full rounded border border-slate-200 bg-white px-3 text-sm"
                 value={form.brand_id}
-                onChange={(e) => setForm((prev) => ({ ...prev, brand_id: e.target.value }))}
+                onChange={(e) => setForm((p) => ({ ...p, brand_id: e.target.value }))}
               >
-                <option value="">Selectionner</option>
-                {brands.map((brand) => (
-                  <option key={brand.id} value={brand.id}>{brand.name}</option>
-                ))}
+                <option value="">Sélectionner</option>
+                {brands.map((b) => <option key={b.id} value={b.id}>{b.name}</option>)}
               </select>
             </div>
 
@@ -548,12 +684,10 @@ export default function AdminProductsPage() {
               <select
                 className="h-10 w-full rounded border border-slate-200 bg-white px-3 text-sm"
                 value={form.category_id}
-                onChange={(e) => setForm((prev) => ({ ...prev, category_id: e.target.value, family_id: '' }))}
+                onChange={(e) => setForm((p) => ({ ...p, category_id: e.target.value, family_id: '' }))}
               >
-                <option value="">Selectionner</option>
-                {categories.map((category) => (
-                  <option key={category.id} value={category.id}>{category.name}</option>
-                ))}
+                <option value="">Sélectionner</option>
+                {categories.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
               </select>
             </div>
 
@@ -562,96 +696,112 @@ export default function AdminProductsPage() {
               <select
                 className="h-10 w-full rounded border border-slate-200 bg-white px-3 text-sm"
                 value={form.family_id}
-                onChange={(e) => setForm((prev) => ({ ...prev, family_id: e.target.value }))}
+                onChange={(e) => setForm((p) => ({ ...p, family_id: e.target.value }))}
               >
-                <option value="">Selectionner</option>
-                {visibleFamilies.map((family) => (
-                  <option key={family.id} value={family.id}>{family.name}</option>
-                ))}
+                <option value="">Sélectionner</option>
+                {visibleFamilies.map((f) => <option key={f.id} value={f.id}>{f.name}</option>)}
               </select>
             </div>
 
+            {/* ── SPECS — seul bloc modifié ── */}
             {form.type === 'STANDARD' && (
               <div className="space-y-2 sm:col-span-2">
-                <Label>Specifications (produit standard)</Label>
+                <Label>Spécifications (produit standard)</Label>
+                {filters.length === 0 && (
+                  <p className="rounded border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-700">
+                    Aucun filtre disponible. Créez d'abord des filtres dans le catalogue pour pouvoir ajouter des specs.
+                  </p>
+                )}
                 <div className="space-y-2 rounded border p-2">
                   {specRows.map((entry, index) => (
                     <div key={index} className="grid grid-cols-[1fr_1fr_auto] gap-2">
-                      <Input
+                      {/*
+                        ── CLÉ : select parmi les filtres existants ──
+                        La valeur stockée (entry.key) est le nom du filtre (string),
+                        identique à ce qu'on envoyait avant — aucun changement de structure.
+                      */}
+                      <select
+                        className="h-10 w-full rounded border border-slate-200 bg-white px-3 text-sm"
                         value={entry.key}
-                        placeholder="Ex: CPU"
-                        onChange={(e) => {
-                          setSpecRows((prev) => {
-                            const next = [...prev]
-                            next[index] = { ...next[index], key: e.target.value }
-                            return next
-                          })
-                        }}
-                      />
+                        onChange={(e) => setSpecRows((prev) => {
+                          const next = [...prev]
+                          next[index] = { ...next[index], key: e.target.value }
+                          return next
+                        })}
+                      >
+                        <option value="">— Choisir un filtre —</option>
+                        {filters.map((f) => (
+                          <option key={f.id} value={f.name}>
+                            {f.name}
+                          </option>
+                        ))}
+                      </select>
+
+                      {/* VALEUR : inchangée, texte libre */}
                       <Input
                         value={entry.value}
-                        placeholder="Ex: Intel Xeon"
-                        onChange={(e) => {
-                          setSpecRows((prev) => {
-                            const next = [...prev]
-                            next[index] = { ...next[index], value: e.target.value }
-                            return next
-                          })
-                        }}
+                        placeholder="Ex: 24"
+                        onChange={(e) => setSpecRows((prev) => {
+                          const next = [...prev]
+                          next[index] = { ...next[index], value: e.target.value }
+                          return next
+                        })}
                       />
+
                       <Button
-                        type="button"
-                        variant="outline"
-                        onClick={() => {
-                          setSpecRows((prev) => prev.length > 1 ? prev.filter((_, rowIndex) => rowIndex !== index) : [{ key: '', value: '' }])
-                        }}
+                        type="button" variant="outline"
+                        onClick={() => setSpecRows((prev) =>
+                          prev.length > 1
+                            ? prev.filter((_, i) => i !== index)
+                            : [{ key: '', value: '' }]
+                        )}
                       >
                         Suppr.
                       </Button>
                     </div>
                   ))}
-                  <Button type="button" variant="outline" onClick={() => setSpecRows((prev) => [...prev, { key: '', value: '' }])}>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    onClick={() => setSpecRows((prev) => [...prev, { key: '', value: '' }])}
+                  >
                     Ajouter une spec
                   </Button>
                 </div>
               </div>
             )}
+            {/* ── FIN SPECS ── */}
 
             {form.type === 'STANDARD' && isSparePartSelection && (
               <div className="space-y-2 sm:col-span-2">
-                <Label>Modeles compatibles (serveur / storage / reseau)</Label>
+                <Label>Modèles compatibles (serveur / storage / réseau)</Label>
                 <div className="space-y-2 rounded border p-3">
                   <Input
-                    placeholder="Rechercher un modele..."
+                    placeholder="Rechercher un modèle..."
                     value={compatibleSearch}
                     onChange={(e) => setCompatibleSearch(e.target.value)}
                   />
                   <div className="max-h-64 space-y-2 overflow-y-auto rounded border bg-slate-50 p-2">
-                    {compatibleModelChoices.length === 0 ? (
-                      <p className="text-sm text-slate-500">Aucun modele configurable trouve.</p>
-                    ) : compatibleModelChoices.map((product) => {
-                      const checked = compatibleModelIds.includes(product.id)
-                      return (
-                        <label key={product.id} className="flex items-start gap-2 rounded border bg-white px-2 py-2 text-sm">
-                          <input
-                            type="checkbox"
-                            checked={checked}
-                            onChange={(e) => {
-                              setCompatibleModelIds((previous) => {
-                                if (e.target.checked) return Array.from(new Set([...previous, product.id]))
-                                return previous.filter((id) => id !== product.id)
-                              })
-                            }}
-                          />
-                          <span>
-                            {product.name}
-                            <span className="block text-xs text-slate-500">
-                              {product.brand.name} / {product.family.name} / {product.category.name}
-                            </span>
-                          </span>
-                        </label>
-                      )
-                    })}
+                    {compatibleModelChoices.length === 0
+                      ? <p className="text-sm text-slate-500">Aucun modèle configurable trouvé.</p>
+                      : compatibleModelChoices.map((p) => {
+                          const checked = compatibleModelIds.includes(p.id)
+                          return (
+                            <label key={p.id} className="flex items-start gap-2 rounded border bg-white px-2 py-2 text-sm">
+                              <input
+                                type="checkbox" checked={checked}
+                                onChange={(e) => setCompatibleModelIds((prev) =>
+                                  e.target.checked ? Array.from(new Set([...prev, p.id])) : prev.filter((id) => id !== p.id)
+                                )}
+                              />
+                              <span>
+                                {p.name}
+                                <span className="block text-xs text-slate-500">{p.brand.name} / {p.family.name} / {p.category.name}</span>
+                              </span>
+                            </label>
+                          )
+                        })
+                    }
                   </div>
                 </div>
               </div>
@@ -659,62 +809,60 @@ export default function AdminProductsPage() {
 
             {form.type === 'STANDARD' && isSparePartSelection && (
               <div className="space-y-2 sm:col-span-2">
-                <Label>Filtres de piece detachee</Label>
+                <Label>Filtres de pièce détachée</Label>
                 <div className="space-y-3 rounded border p-3">
-                  {compatibleModelIds.length === 0 ? (
-                    <p className="text-sm text-slate-500">Selectionne d'abord au moins un modele compatible.</p>
-                  ) : (
-                    <>
-                      <select
-                        value={sparepartTargetId ?? ''}
-                        onChange={(e) => setSparepartTargetId(Number(e.target.value) || null)}
-                        className="w-full rounded border px-3 py-2 text-sm"
-                      >
-                        <option value="">Selectionner un modele cible</option>
-                        {compatibleModelChoices
-                          .filter((product) => compatibleModelIds.includes(product.id))
-                          .map((product) => (
-                            <option key={product.id} value={product.id}>
-                              {product.name} - {product.brand.name} / {product.family.name}
-                            </option>
-                          ))}
-                      </select>
+                  {compatibleModelIds.length === 0
+                    ? <p className="text-sm text-slate-500">Sélectionne d'abord au moins un modèle compatible.</p>
+                    : (
+                      <>
+                        <select
+                          value={sparepartTargetId ?? ''}
+                          onChange={(e) => setSparepartTargetId(Number(e.target.value) || null)}
+                          className="w-full rounded border px-3 py-2 text-sm"
+                        >
+                          <option value="">Sélectionner un modèle cible</option>
+                          {compatibleModelChoices
+                            .filter((p) => compatibleModelIds.includes(p.id))
+                            .map((p) => (
+                              <option key={p.id} value={p.id}>{p.name} - {p.brand.name} / {p.family.name}</option>
+                            ))}
+                        </select>
 
-                      {sparepartTargetId ? (
-                        <div className="space-y-2">
-                          {filters.length === 0 ? (
-                            <p className="text-sm text-slate-500">Aucun filtre configure dans le catalogue.</p>
-                          ) : (
-                            filters.map((filter) => {
-                              const checked = (sparepartFilterAssignments[sparepartTargetId] ?? []).includes(filter.id)
-                              return (
-                                <label key={filter.id} className={`flex cursor-pointer items-center justify-between rounded border px-3 py-2 text-sm ${checked ? 'border-[#2ad1a4] bg-[#f0fdf9]' : 'bg-white'}`}>
-                                  <span className="flex items-center gap-2">
-                                    <input
-                                      type="checkbox"
-                                      checked={checked}
-                                      onChange={(event) => {
-                                        setSparepartFilterAssignments((previous) => {
-                                          const current = previous[sparepartTargetId] ?? []
-                                          const next = event.target.checked
-                                            ? Array.from(new Set([...current, filter.id]))
-                                            : current.filter((value) => value !== filter.id)
-                                          return { ...previous, [sparepartTargetId]: next }
-                                        })
-                                      }}
-                                    />
-                                    {filter.name}
-                                  </span>
-                                </label>
-                              )
-                            })
-                          )}
-                        </div>
-                      ) : (
-                        <p className="text-sm text-slate-500">Choisis un modele cible pour definir ses filtres.</p>
-                      )}
-                    </>
-                  )}
+                        {sparepartTargetId ? (
+                          <div className="space-y-2">
+                            {filters.length === 0
+                              ? <p className="text-sm text-slate-500">Aucun filtre configuré dans le catalogue.</p>
+                              : filters.map((filter) => {
+                                  const checked = (sparepartFilterAssignments[sparepartTargetId] ?? []).includes(filter.id)
+                                  return (
+                                    <label
+                                      key={filter.id}
+                                      className={`flex cursor-pointer items-center justify-between rounded border px-3 py-2 text-sm ${checked ? 'border-[#2ad1a4] bg-[#f0fdf9]' : 'bg-white'}`}
+                                    >
+                                      <span className="flex items-center gap-2">
+                                        <input
+                                          type="checkbox" checked={checked}
+                                          onChange={(e) => setSparepartFilterAssignments((prev) => {
+                                            const current = prev[sparepartTargetId] ?? []
+                                            const next = e.target.checked
+                                              ? Array.from(new Set([...current, filter.id]))
+                                              : current.filter((v) => v !== filter.id)
+                                            return { ...prev, [sparepartTargetId]: next }
+                                          })}
+                                        />
+                                        {filter.name}
+                                      </span>
+                                    </label>
+                                  )
+                                })
+                            }
+                          </div>
+                        ) : (
+                          <p className="text-sm text-slate-500">Choisis un modèle cible pour définir ses filtres.</p>
+                        )}
+                      </>
+                    )
+                  }
                 </div>
               </div>
             )}
@@ -727,6 +875,7 @@ export default function AdminProductsPage() {
         </DialogContent>
       </Dialog>
 
+      {/* ── Dialog options configurables ───────────────────────────────────── */}
       <Dialog
         open={Boolean(optionDialogProduct)}
         onOpenChange={(open) => {
@@ -739,77 +888,38 @@ export default function AdminProductsPage() {
       >
         <DialogContent className="max-h-[90vh] overflow-y-auto sm:max-w-2xl">
           <DialogHeader>
-            <DialogTitle>
-              Options configurables {optionDialogProduct ? `- ${optionDialogProduct.name}` : ''}
-            </DialogTitle>
-            <DialogDescription>
-              Configurez les options disponibles et les variations de prix pour ce produit.
-            </DialogDescription>
+            <DialogTitle>Options configurables {optionDialogProduct ? `- ${optionDialogProduct.name}` : ''}</DialogTitle>
+            <DialogDescription>Configurez les options disponibles et les variations de prix pour ce produit.</DialogDescription>
           </DialogHeader>
 
           <div className="space-y-3">
-            <Label>Nom de l option</Label>
+            <Label>Nom de l'option</Label>
             <Input value={optionName} onChange={(e) => setOptionName(e.target.value)} placeholder="Ex: CPU" />
 
             {optionValues.map((entry, index) => (
               <div key={index} className="grid grid-cols-[1fr_120px_100px] gap-2">
                 <Input
-                  value={entry.value}
-                  placeholder="Valeur"
-                  onChange={(e) => {
-                    setOptionValues((prev) => {
-                      const next = [...prev]
-                      next[index] = { ...next[index], value: e.target.value }
-                      return next
-                    })
-                  }}
+                  value={entry.value} placeholder="Valeur"
+                  onChange={(e) => setOptionValues((prev) => { const next = [...prev]; next[index] = { ...next[index], value: e.target.value }; return next })}
                 />
                 <Input
-                  type="number"
-                  step="0.01"
-                  value={entry.price}
-                  placeholder="Prix"
-                  onChange={(e) => {
-                    setOptionValues((prev) => {
-                      const next = [...prev]
-                      next[index] = { ...next[index], price: e.target.value }
-                      return next
-                    })
-                  }}
+                  type="number" step="0.01" value={entry.price} placeholder="Prix"
+                  onChange={(e) => setOptionValues((prev) => { const next = [...prev]; next[index] = { ...next[index], price: e.target.value }; return next })}
                 />
                 <Input
-                  type="number"
-                  min="1"
-                  value={entry.quantity}
-                  placeholder="Qte"
-                  onChange={(e) => {
-                    setOptionValues((prev) => {
-                      const next = [...prev]
-                      next[index] = { ...next[index], quantity: e.target.value }
-                      return next
-                    })
-                  }}
+                  type="number" min="1" value={entry.quantity} placeholder="Qté"
+                  onChange={(e) => setOptionValues((prev) => { const next = [...prev]; next[index] = { ...next[index], quantity: e.target.value }; return next })}
                 />
               </div>
             ))}
 
             <div className="flex gap-2">
-              <Button
-                variant="outline"
-                onClick={() => setOptionValues((prev) => [...prev, { value: '', price: '0', quantity: '1' }])}
-              >
+              <Button variant="outline" onClick={() => setOptionValues((prev) => [...prev, { value: '', price: '0', quantity: '1' }])}>
                 Ajouter une ligne
               </Button>
               {editingOptionId && (
-                <Button
-                  variant="outline"
-                  onClick={() => {
-                    setEditingOptionId(null)
-                    setOptionName('')
-                    setOptionValues([{ value: '', price: '0', quantity: '1' }])
-                  }}
-                >
-                  Annuler edition
+                <Button variant="outline" onClick={() => { setEditingOptionId(null); setOptionName(''); setOptionValues([{ value: '', price: '0', quantity: '1' }]) }}>
+                  Annuler édition
                 </Button>
               )}
               <Button onClick={addOption}>{editingOptionId ? 'Enregistrer option' : 'Ajouter option'}</Button>
@@ -828,7 +938,7 @@ export default function AdminProductsPage() {
                       </div>
                     </div>
                     <p className="text-xs text-slate-500">
-                      {option.values.map((value) => `${value.value} x${value.quantity} (+${Number(value.price).toFixed(2)})`).join(', ')}
+                      {option.values.map((v) => `${v.value} x${v.quantity} (+${Number(v.price).toFixed(2)})`).join(', ')}
                     </p>
                   </div>
                 ))}

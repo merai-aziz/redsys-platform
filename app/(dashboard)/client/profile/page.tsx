@@ -29,7 +29,7 @@ export default function ClientProfilePage() {
 
   const [form, setForm] = useState({
     firstName: '', lastName: '', phone: '',
-    adresse: '', companyName: ''
+    adresse: '', 
   })
   const [pwdForm, setPwdForm] = useState({
     currentPassword: '', newPassword: '', confirmPassword: ''
@@ -70,7 +70,6 @@ export default function ClientProfilePage() {
           lastName:    d.user.lastName    || '',
           phone:       d.user.phone       || '',
           adresse:     d.user.adresse     || '',
-          companyName: d.user.companyName || '',
         })
       }
       setLoading(false)
@@ -262,17 +261,7 @@ export default function ClientProfilePage() {
             </div>
           </div>
 
-          <div>
-            <Label>
-              <span className="inline-flex items-center gap-1">
-                <Building2 size={11} /> Nom de la compagnie
-              </span>
-            </Label>
-            <Input value={form.companyName}
-              onChange={e => setForm({ ...form, companyName: e.target.value })}
-              placeholder="Votre entreprise (optionnel)"
-              className="mt-2 h-11 border-slate-200 bg-slate-50" />
-          </div>
+
 
           <div className="flex justify-end">
             <Button onClick={handleSave} disabled={saving} className="h-11 bg-sky-600 text-white hover:bg-sky-700">

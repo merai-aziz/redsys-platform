@@ -10,13 +10,12 @@ export default function ClientLayout({ children }: { children: React.ReactNode }
       allowedRole="CLIENT"
       roleLabel="CLIENT"
       roleTintClass="bg-emerald-500/15 text-emerald-300"
-      title="Espace Client"
+      title=""
       profileHref="/client/profile"
-      navItems={[{ href: '/client/profile', label: 'Mon profil', icon: UserCircle },
-         { href: '/client/orders', label: 'Mes commandes', icon: ShoppingBag }, 
-        { href: '/client/tickets', label: 'Mes tickets', icon: Ticket }, 
-
-
+      navItems={[
+        { href: '/client/profile', label: 'Mon profil', icon: UserCircle },
+        { href: '/client/orders', label: 'Mes commandes', icon: ShoppingBag },
+        { href: '/client/tickets', label: 'Mes tickets', icon: Ticket }
       ]}
     >
       {children}

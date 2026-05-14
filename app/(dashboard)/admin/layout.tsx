@@ -15,8 +15,8 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
         { href: '/admin/catalog', label: 'Catalogue', icon: Layers },
         { href: '/admin/products', label: 'Produits', icon: Package },
         { href: '/admin/orders', label: 'Commandes', icon: ShoppingCart }, 
-        { href: '/admin/contracts', label: 'contrats', icon: FileText }, 
-        { href: '/admin/tickets', label: 'tickets', icon: Ticket  }, 
+        { href: '/admin/contracts', label: 'Contrats', icon: FileText }, 
+        { href: '/admin/tickets', label: 'Tickets', icon: Ticket }, 
         { href: '/admin/users', label: 'Utilisateurs', icon: Users },
         { href: '/admin/logs', label: 'Historique des logs', icon: FileText },
       ]}

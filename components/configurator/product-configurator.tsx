@@ -4,6 +4,7 @@ import { useState } from 'react'
 import Image from 'next/image'
 import { ShoppingCart, ChevronDown, Check, X, Star } from 'lucide-react'
 import { useCart } from '@/context/CartContext'
+import DOMPurify from 'dompurify'  // ← ajout
 
 interface ConfigValue {
   id: number
@@ -114,6 +115,19 @@ export function ProductConfigurator({
     })
   }
 
+  // ── Sanitize helpers ──────────────────────────────────────────────────────
+  const safeFullDescription = DOMPurify.sanitize(fullDescription)
+
+  const trustBadges = [
+    'Garantie de 3 ans sur toutes les configurations',
+    "Uniquement des pièces d'origine",
+    'Envoi anonyme directement à votre client final',
+    'Toute machine est expédiée de notre propre entrepôt',
+    'Expédition <strong>DANS LE MONDE ENTIER</strong> (Envoi standard 15 EUR / Express 25 EUR)',
+    'La préparation de la configuration prendra 1 à 2 jours ouvrables, y compris les tests',
+  ].map((text) => DOMPurify.sanitize(text, { ALLOWED_TAGS: ['strong'], ALLOWED_ATTR: [] }))
+  // ─────────────────────────────────────────────────────────────────────────
+
   return (
     <>
       {/* ───── Description Modal ───── */}
@@ -133,9 +147,10 @@ export function ProductConfigurator({
               <X size={22} />
             </button>
             <h2 className="mb-4 text-2xl font-bold text-[#1a3a52]">{productName}</h2>
+            {/* ✅ CORRIGÉ : fullDescription sanitizé */}
             <div
               className="prose prose-sm text-gray-600"
-              dangerouslySetInnerHTML={{ __html: fullDescription }}
+              dangerouslySetInnerHTML={{ __html: safeFullDescription }}
             />
           </div>
         </div>
@@ -225,7 +240,6 @@ export function ProductConfigurator({
         <div className="space-y-4 lg:col-span-2">
           {options.map((opt) => (
             <div key={opt.id} className="overflow-hidden rounded-xl bg-white shadow-sm">
-              {/* Section header */}
               <button
                 onClick={() => toggleSection(opt.id)}
                 className="flex w-full items-center justify-between px-5 py-4 text-left"
@@ -239,10 +253,8 @@ export function ProductConfigurator({
                 />
               </button>
 
-              {/* Section body */}
               {openSections[opt.id] && (
                 <div className="border-t border-gray-100 px-5 pb-5 pt-4 space-y-2">
-                  {/* Group values by "category" prefix (text before first space-hyphen pattern) */}
                   {groupValues(opt.values).map(({ label, items }) => (
                     <div key={label}>
                       {label && (
@@ -356,7 +368,6 @@ export function ProductConfigurator({
                 {totalPrice.toFixed(2)} €
               </div>
 
-              {/* Quantity + Add to cart */}
               <div className="flex items-center gap-2">
                 <div className="flex items-center rounded-lg border border-[#2ad1a4]">
                   <button
@@ -391,17 +402,11 @@ export function ProductConfigurator({
 
             {/* Trust badges */}
             <div className="border-t border-gray-100 px-5 py-4 space-y-2">
-              {[
-                'Garantie de 3 ans sur toutes les configurations',
-                'Uniquement des pièces d\'origine',
-                'Envoi anonyme directement à votre client final',
-                'Toute machine est expédiée de notre propre entrepôt',
-                'Expédition DANS LE MONDE ENTIER (Envoi standard 15 EUR / Express 25 EUR)',
-                'La préparation de la configuration prendra 1 à 2 jours ouvrables, y compris les tests',
-              ].map((text) => (
-                <div key={text} className="flex items-start gap-2 text-xs text-gray-600">
+              {/* ✅ CORRIGÉ : badges sanitizés, strong autorisé uniquement */}
+              {trustBadges.map((text, i) => (
+                <div key={i} className="flex items-start gap-2 text-xs text-gray-600">
                   <Check size={14} className="mt-0.5 shrink-0 text-[#2ad1a4]" />
-                  <span dangerouslySetInnerHTML={{ __html: text.replace('DANS LE MONDE ENTIER', '<strong>DANS LE MONDE ENTIER</strong>') }} />
+                  <span dangerouslySetInnerHTML={{ __html: text }} />
                 </div>
               ))}
             </div>
@@ -412,15 +417,10 @@ export function ProductConfigurator({
   )
 }
 
-// ── Helper: group option values by a leading label like "4-Core", "6-Core" etc.
-// Values that don't match get grouped under label = ''
 function groupValues(values: ConfigValue[]): { label: string; items: ConfigValue[] }[] {
   const groups: { label: string; items: ConfigValue[] }[] = []
   let current: { label: string; items: ConfigValue[] } | null = null
 
-  // Detect if values carry embedded group labels (e.g. "E5-2637v4 (3.50GHz - 4-Core)")
-  // We simply emit all values ungrouped unless the value text starts with a category keyword
-  // For simplicity we just return one flat group here; extend as needed.
   for (const val of values) {
     if (!current) {
       current = { label: '', items: [val] }
