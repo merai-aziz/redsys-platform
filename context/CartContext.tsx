@@ -21,7 +21,7 @@ export type ConfigurableCartItem = {
   name: string
   brandName: string
   basePrice: number
-  options: Array<{ label: string; price: number }>
+  options: Array<{ label: string; price: number; optionId?: number; qty?: number }>
   quantity: number
   image?: string
 }
@@ -49,16 +49,22 @@ type CartAction =
   | { type: 'ADD_ITEM'; payload: CartItem }
   | { type: 'REMOVE_ITEM'; payload: { modelId: string } }
   | { type: 'UPDATE_QUANTITY'; payload: { modelId: string; qty: number } }
+  | { type: 'REMOVE_OPTION'; payload: { modelId: string; optionIndex: number } }
+  | { type: 'UPDATE_OPTION_QTY'; payload: { modelId: string; optionIndex: number; qty: number } }
   | { type: 'CLEAR_CART' }
 
 const CART_STORAGE_KEY = 'redsys-cart'
 
 const initialState: CartState = { items: [] }
 
+function isStandardOrSpare(item: Partial<CartItem>): boolean {
+  return item.type === 'standard' || item.type === 'spare'
+}
+
 function isCartItem(value: unknown): value is CartItem {
   if (!value || typeof value !== 'object') return false
 
-  const item = value as Partial<CartItem>
+  const item = value as Record<string, unknown>
   if (typeof item.type !== 'string' || typeof item.modelId !== 'string' || typeof item.name !== 'string') return false
   if (typeof item.brandName !== 'string' || typeof item.quantity !== 'number') return false
 
@@ -66,7 +72,11 @@ function isCartItem(value: unknown): value is CartItem {
     return typeof item.basePrice === 'number' && Array.isArray(item.options)
   }
 
-  return typeof item.reference === 'string' && typeof item.price === 'number'
+  if (item.type === 'standard' || item.type === 'spare') {
+    return typeof item.reference === 'string' && typeof item.price === 'number'
+  }
+
+  return false
 }
 
 function cartReducer(state: CartState, action: CartAction): CartState {
@@ -107,6 +117,31 @@ function cartReducer(state: CartState, action: CartAction): CartState {
       }
     }
 
+    case 'REMOVE_OPTION': {
+      return {
+        items: state.items.map((item) => {
+          if (item.modelId !== action.payload.modelId || item.type !== 'configurable') return item
+          const newOptions = item.options.filter((_, i) => i !== action.payload.optionIndex)
+          return { ...item, options: newOptions }
+        }),
+      }
+    }
+
+    case 'UPDATE_OPTION_QTY': {
+      return {
+        items: state.items.map((item) => {
+          if (item.modelId !== action.payload.modelId || item.type !== 'configurable') return item
+          const newOptions = item.options.map((opt, i) => {
+            if (i !== action.payload.optionIndex) return opt
+            const newQty = Math.max(1, action.payload.qty)
+            // Recalculate price based on unit price stored in qty metadata
+            return { ...opt, qty: newQty }
+          })
+          return { ...item, options: newOptions }
+        }),
+      }
+    }
+
     case 'CLEAR_CART':
       return initialState
 
@@ -120,6 +155,8 @@ type CartContextValue = {
   addItem: (item: CartItem) => void
   removeItem: (modelId: string) => void
   updateQuantity: (modelId: string, qty: number) => void
+  removeOption: (modelId: string, optionIndex: number) => void
+  updateOptionQty: (modelId: string, optionIndex: number, qty: number) => void
   clearCart: () => void
   totalItems: number
   totalPrice: number
@@ -166,7 +203,7 @@ function mergeStoredCarts(...collections: CartItem[][]) {
       itemsByModelId.set(item.modelId, {
         ...existing,
         quantity: existing.quantity + item.quantity,
-      })
+      } as CartItem)
     }
   }
 
@@ -242,6 +279,8 @@ export function CartProvider({ children }: { children: React.ReactNode }) {
       addItem: (item) => dispatch({ type: 'ADD_ITEM', payload: item }),
       removeItem: (modelId) => dispatch({ type: 'REMOVE_ITEM', payload: { modelId } }),
       updateQuantity: (modelId, qty) => dispatch({ type: 'UPDATE_QUANTITY', payload: { modelId, qty } }),
+      removeOption: (modelId, optionIndex) => dispatch({ type: 'REMOVE_OPTION', payload: { modelId, optionIndex } }),
+      updateOptionQty: (modelId, optionIndex, qty) => dispatch({ type: 'UPDATE_OPTION_QTY', payload: { modelId, optionIndex, qty } }),
       clearCart: () => dispatch({ type: 'CLEAR_CART' }),
       totalItems,
       totalPrice,

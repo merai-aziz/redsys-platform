@@ -16,7 +16,18 @@ export async function GET(request: Request) {
         family: true,
         category: true,
         configuration_options: {
-          include: { values: true },
+          include: {
+            values: {
+              include: {
+                standard_product: {
+                  include: {
+                    brand: true,
+                    family: true,
+                  },
+                },
+              },
+            },
+          },
         },
         specs: {
           orderBy: [{ spec_key: 'asc' }, { spec_value: 'asc' }],
@@ -45,7 +56,18 @@ export async function GET(request: Request) {
           family: true,
           category: true,
           configuration_options: {
-            include: { values: true },
+            include: {
+              values: {
+                include: {
+                  standard_product: {
+                    include: {
+                      brand: true,
+                      family: true,
+                    },
+                  },
+                },
+              },
+            },
           },
           specs: {
             orderBy: [{ spec_key: 'asc' }, { spec_value: 'asc' }],
@@ -160,11 +182,8 @@ export async function POST(request: Request) {
           brand_id: brandId,
           family_id: familyId,
           category_id: categoryId,
-          product_filter_values: type === 'CONFIGURABLE' ? {
-            create: filterValueIds.map((filterValueId) => ({
-              filter_value_id: filterValueId,
-            })),
-          } : undefined,
+          // Pour CONFIGURABLE : pas de filter_value_ids ni specs à la création
+          // Les options configurables sont ajoutées via /api/admin/products/[id]/options
           specs: type === 'STANDARD' ? {
             create: specs.map((entry) => ({
               spec_key: entry.key,
@@ -182,7 +201,18 @@ export async function POST(request: Request) {
           category: true,
           specs: true,
           configuration_options: {
-            include: { values: true },
+            include: {
+              values: {
+                include: {
+                  standard_product: {
+                    include: {
+                      brand: true,
+                      family: true,
+                    },
+                  },
+                },
+              },
+            },
           },
           product_filter_values: {
             include: {
@@ -208,9 +238,9 @@ export async function POST(request: Request) {
     try {
       await prisma.productCompatibility.createMany({
         data: compatibleProductIds
-          .filter((targetProductId) => targetProductId !== product.id)
+          .filter((targetProductId) => targetProductId !== product!.id)
           .map((targetProductId) => ({
-            part_product_id: product.id,
+            part_product_id: product!.id,
             target_product_id: targetProductId,
           })),
         skipDuplicates: true,
@@ -230,7 +260,7 @@ export async function POST(request: Request) {
           entry.filterIds.map((filterId, sortOrder) =>
             prisma.sparepartFilter.create({
               data: {
-                part_product_id: product.id,
+                part_product_id: product!.id,
                 target_product_id: entry.targetProductId,
                 filter_id: filterId,
                 sort_order: sortOrder,

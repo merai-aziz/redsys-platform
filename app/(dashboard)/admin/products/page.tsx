@@ -19,6 +19,32 @@ interface Filter {
   name: string
 }
 
+interface StandardProduct {
+  id: number
+  name: string
+  base_price: number
+  stock_qty: number
+  in_stock: boolean
+  brand: { id: number; name: string }
+  family: { id: number; name: string }
+}
+
+interface ConfigurationValue {
+  id: number
+  group_name: string | null
+  price: number | string
+  quantity: number
+  standard_product: StandardProduct
+}
+
+interface ConfigurationOption {
+  id: number
+  name: string
+  allow_none: boolean
+  use_groups: boolean
+  values: ConfigurationValue[]
+}
+
 interface Product {
   id: number
   name: string
@@ -33,11 +59,7 @@ interface Product {
   category: Category
   family: Family
   specs: Array<{ id: number; spec_key: string; spec_value: string }>
-  configuration_options: Array<{
-    id: number
-    name: string
-    values: Array<{ id: number; value: string; price: string; quantity: number }>
-  }>
+  configuration_options: ConfigurationOption[]
   compatibilities_as_part?: Array<{ target_product_id: number }>
   sparepart_filters_as_part?: Array<{ target_product_id: number; filter_id: number }>
 }
@@ -54,6 +76,12 @@ const emptyForm = {
   brand_id: '',
   category_id: '',
   family_id: '',
+}
+
+// Nouvelle structure pour les valeurs d'options en mode groupes
+interface GroupValue {
+  group_name: string
+  products: string[]  // IDs des produits standards sous forme de string
 }
 
 // ─── ImageUploadField ────────────────────────────────────────────────────────
@@ -248,10 +276,48 @@ export default function AdminProductsPage() {
   const [sparepartTargetId, setSparepartTargetId] = useState<number | null>(null)
   const [sparepartFilterAssignments, setSparepartFilterAssignments] = useState<Record<number, number[]>>({})
 
+  // ── État dialog options configurables ──────────────────────────────────────
   const [optionDialogProduct, setOptionDialogProduct] = useState<Product | null>(null)
   const [optionName, setOptionName] = useState('')
-  const [optionValues, setOptionValues] = useState<Array<{ value: string; price: string; quantity: string }>>([{ value: '', price: '0', quantity: '1' }])
+  const [optionAllowNone, setOptionAllowNone] = useState(false)
+  const [optionUseGroups, setOptionUseGroups] = useState(false)
+
+  // Mode SANS groupes : chaque ligne = { standard_product_id }
+  // Mode AVEC groupes : tableau de groupes avec leurs produits
+  const [optionSimpleValues, setOptionSimpleValues] = useState<Array<{ standard_product_id: string }>>([
+    { standard_product_id: '' },
+  ])
+  const [optionGroupValues, setOptionGroupValues] = useState<GroupValue[]>([
+    { group_name: '', products: [''] }
+  ])
+  
   const [editingOptionId, setEditingOptionId] = useState<number | null>(null)
+  const [standardProductSearch, setStandardProductSearch] = useState('')
+
+  const standardProducts = useMemo(
+    () => products.filter((p) => p.type === 'STANDARD').sort((a, b) => a.name.localeCompare(b.name)),
+    [products],
+  )
+
+  const filteredStandardProducts = useMemo(() => {
+    const q = standardProductSearch.trim().toLowerCase()
+    return standardProducts.filter((p) => {
+      if (!q) return true
+      const haystack = `${p.name} ${p.brand.name} ${p.family.name}`.toLowerCase()
+      return haystack.includes(q)
+    })
+  }, [standardProducts, standardProductSearch])
+
+  const standardProductsByFamily = useMemo(() => {
+    const map = new Map<string, { familyName: string; products: Product[] }>()
+    filteredStandardProducts.forEach((p) => {
+      const key = String(p.family.id)
+      const existing = map.get(key) ?? { familyName: p.family.name, products: [] }
+      existing.products.push(p)
+      map.set(key, existing)
+    })
+    return Array.from(map.values()).sort((a, b) => a.familyName.localeCompare(b.familyName))
+  }, [filteredStandardProducts])
 
   async function loadAll() {
     async function safeJson(response: Response) {
@@ -449,15 +515,58 @@ export default function AdminProductsPage() {
     await loadAll()
   }
 
+  // ── Réinitialiser le form option ───────────────────────────────────────────
+  function resetOptionForm() {
+    setEditingOptionId(null)
+    setOptionName('')
+    setOptionAllowNone(false)
+    setOptionUseGroups(false)
+    setOptionSimpleValues([{ standard_product_id: '' }])
+    setOptionGroupValues([{ group_name: '', products: [''] }])
+    setStandardProductSearch('')
+  }
+
+  // ── Sauvegarder une option configurable ────────────────────────────────────
   async function addOption() {
     if (!optionDialogProduct || !optionName.trim()) return
-    const cleanedValues = optionValues
-      .filter((e) => e.value.trim())
-      .map((e) => ({
-        value: e.value.trim(),
-        price: Number(e.price || 0),
-        quantity: Math.max(1, Math.trunc(Number(e.quantity || 1))),
-      }))
+
+    let cleanedValues
+
+    if (optionUseGroups) {
+      // Mode avec groupes : transformer la structure groupée en valeurs individuelles
+      cleanedValues = []
+      for (const group of optionGroupValues) {
+        const groupName = group.group_name.trim()
+        if (!groupName) continue // Ignorer les groupes sans nom
+        
+        for (const productId of group.products) {
+          const productIdNum = Number(productId)
+          if (Number.isInteger(productIdNum) && productIdNum > 0) {
+            cleanedValues.push({
+              group_name: groupName,
+              standard_product_id: productIdNum,
+            })
+          }
+        }
+      }
+    } else {
+      // Mode sans groupes
+      cleanedValues = optionSimpleValues
+        .filter((e) => Number.isInteger(Number(e.standard_product_id)) && Number(e.standard_product_id) > 0)
+        .map((e) => ({
+          group_name: null,
+          standard_product_id: Number(e.standard_product_id),
+        }))
+    }
+
+    if (cleanedValues.length === 0) {
+      toast.error(
+        optionUseGroups
+          ? 'Ajoutez au moins un groupe avec un nom et des produits standards sélectionnés.'
+          : 'Ajoutez au moins un produit standard.',
+      )
+      return
+    }
 
     const res = await fetch(
       editingOptionId
@@ -466,7 +575,12 @@ export default function AdminProductsPage() {
       {
         method: editingOptionId ? 'PUT' : 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ name: optionName.trim(), values: cleanedValues }),
+        body: JSON.stringify({
+          name: optionName.trim(),
+          allow_none: optionAllowNone,
+          use_groups: optionUseGroups,
+          values: cleanedValues,
+        }),
       },
     )
 
@@ -477,20 +591,44 @@ export default function AdminProductsPage() {
     }
 
     toast.success(editingOptionId ? 'Option modifiée' : 'Option ajoutée')
-    setEditingOptionId(null)
-    setOptionName('')
-    setOptionValues([{ value: '', price: '0', quantity: '1' }])
+    resetOptionForm()
     await loadAll()
   }
 
-  function startEditOption(option: Product['configuration_options'][number]) {
+  function startEditOption(option: ConfigurationOption) {
     setEditingOptionId(option.id)
     setOptionName(option.name)
-    setOptionValues(
-      option.values.length > 0
-        ? option.values.map((v) => ({ value: v.value, price: String(v.price), quantity: String(v.quantity ?? 1) }))
-        : [{ value: '', price: '0', quantity: '1' }],
-    )
+    setOptionAllowNone(option.allow_none)
+    setOptionUseGroups(option.use_groups)
+    
+    if (option.use_groups) {
+      // Transformer les valeurs en structure groupée
+      const groupsMap = new Map<string, string[]>()
+      option.values.forEach((v) => {
+        const groupName = v.group_name || ''
+        if (!groupsMap.has(groupName)) {
+          groupsMap.set(groupName, [])
+        }
+        groupsMap.get(groupName)!.push(String(v.standard_product.id))
+      })
+      
+      const groups: GroupValue[] = Array.from(groupsMap.entries()).map(([groupName, products]) => ({
+        group_name: groupName,
+        products: products.length > 0 ? products : [''],
+      }))
+      
+      setOptionGroupValues(groups.length > 0 ? groups : [{ group_name: '', products: [''] }])
+      setOptionSimpleValues([{ standard_product_id: '' }])
+    } else {
+      setOptionSimpleValues(
+        option.values.length > 0
+          ? option.values.map((v) => ({ standard_product_id: String(v.standard_product.id) }))
+          : [{ standard_product_id: '' }],
+      )
+      setOptionGroupValues([{ group_name: '', products: [''] }])
+    }
+    
+    setStandardProductSearch('')
   }
 
   async function deleteOption(optionId: number) {
@@ -502,12 +640,36 @@ export default function AdminProductsPage() {
       return
     }
     toast.success('Option supprimée')
-    if (editingOptionId === optionId) {
-      setEditingOptionId(null)
-      setOptionName('')
-      setOptionValues([{ value: '', price: '0', quantity: '1' }])
-    }
+    if (editingOptionId === optionId) resetOptionForm()
     await loadAll()
+  }
+
+  // ── Sélecteur de produit standard réutilisable ─────────────────────────────
+  function StandardProductSelect({
+    value,
+    onChange,
+  }: {
+    value: string
+    onChange: (v: string) => void
+  }) {
+    return (
+      <select
+        className="h-10 w-full rounded border border-slate-200 bg-white px-3 text-sm"
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
+      >
+        <option value="">— Choisir un produit standard —</option>
+        {standardProductsByFamily.map((group) => (
+          <optgroup key={group.familyName} label={`📦 ${group.familyName}`}>
+            {group.products.map((p) => (
+              <option key={p.id} value={p.id}>
+                {p.brand.name} — {p.name} ({Number(p.base_price).toFixed(2)} EUR)
+              </option>
+            ))}
+          </optgroup>
+        ))}
+      </select>
+    )
   }
 
   return (
@@ -570,7 +732,10 @@ export default function AdminProductsPage() {
                       <Button
                         variant="outline" size="sm"
                         disabled={product.type !== 'CONFIGURABLE'}
-                        onClick={() => setOptionDialogProduct(product)}
+                        onClick={() => {
+                          setOptionDialogProduct(product)
+                          resetOptionForm()
+                        }}
                       >
                         Options
                       </Button>
@@ -620,7 +785,6 @@ export default function AdminProductsPage() {
               </select>
             </div>
 
-            {/* ── Image upload ── */}
             <div className="space-y-2 sm:col-span-2">
               <Label>Image du produit</Label>
               <ImageUploadField
@@ -703,23 +867,17 @@ export default function AdminProductsPage() {
               </select>
             </div>
 
-            {/* ── SPECS — seul bloc modifié ── */}
             {form.type === 'STANDARD' && (
               <div className="space-y-2 sm:col-span-2">
                 <Label>Spécifications (produit standard)</Label>
                 {filters.length === 0 && (
                   <p className="rounded border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-700">
-                    Aucun filtre disponible. Créez d'abord des filtres dans le catalogue pour pouvoir ajouter des specs.
+                    Aucun filtre disponible. Créez d'abord des filtres dans le catalogue.
                   </p>
                 )}
                 <div className="space-y-2 rounded border p-2">
                   {specRows.map((entry, index) => (
                     <div key={index} className="grid grid-cols-[1fr_1fr_auto] gap-2">
-                      {/*
-                        ── CLÉ : select parmi les filtres existants ──
-                        La valeur stockée (entry.key) est le nom du filtre (string),
-                        identique à ce qu'on envoyait avant — aucun changement de structure.
-                      */}
                       <select
                         className="h-10 w-full rounded border border-slate-200 bg-white px-3 text-sm"
                         value={entry.key}
@@ -731,13 +889,9 @@ export default function AdminProductsPage() {
                       >
                         <option value="">— Choisir un filtre —</option>
                         {filters.map((f) => (
-                          <option key={f.id} value={f.name}>
-                            {f.name}
-                          </option>
+                          <option key={f.id} value={f.name}>{f.name}</option>
                         ))}
                       </select>
-
-                      {/* VALEUR : inchangée, texte libre */}
                       <Input
                         value={entry.value}
                         placeholder="Ex: 24"
@@ -747,7 +901,6 @@ export default function AdminProductsPage() {
                           return next
                         })}
                       />
-
                       <Button
                         type="button" variant="outline"
                         onClick={() => setSpecRows((prev) =>
@@ -761,8 +914,7 @@ export default function AdminProductsPage() {
                     </div>
                   ))}
                   <Button
-                    type="button"
-                    variant="outline"
+                    type="button" variant="outline"
                     onClick={() => setSpecRows((prev) => [...prev, { key: '', value: '' }])}
                   >
                     Ajouter une spec
@@ -770,7 +922,6 @@ export default function AdminProductsPage() {
                 </div>
               </div>
             )}
-            {/* ── FIN SPECS ── */}
 
             {form.type === 'STANDARD' && isSparePartSelection && (
               <div className="space-y-2 sm:col-span-2">
@@ -881,65 +1032,291 @@ export default function AdminProductsPage() {
         onOpenChange={(open) => {
           if (open) return
           setOptionDialogProduct(null)
-          setEditingOptionId(null)
-          setOptionName('')
-          setOptionValues([{ value: '', price: '0', quantity: '1' }])
+          resetOptionForm()
         }}
       >
-        <DialogContent className="max-h-[90vh] overflow-y-auto sm:max-w-2xl">
+        <DialogContent className="max-h-[90vh] overflow-y-auto sm:max-w-3xl">
           <DialogHeader>
-            <DialogTitle>Options configurables {optionDialogProduct ? `- ${optionDialogProduct.name}` : ''}</DialogTitle>
-            <DialogDescription>Configurez les options disponibles et les variations de prix pour ce produit.</DialogDescription>
+            <DialogTitle>Options configurables {optionDialogProduct ? `— ${optionDialogProduct.name}` : ''}</DialogTitle>
+            <DialogDescription>
+              Choisissez le mode d'affichage de l'option : avec groupes (ex: CPU par nb de cœurs) ou sans groupes (ex: Raid Controller).
+            </DialogDescription>
           </DialogHeader>
 
-          <div className="space-y-3">
-            <Label>Nom de l'option</Label>
-            <Input value={optionName} onChange={(e) => setOptionName(e.target.value)} placeholder="Ex: CPU" />
+          <div className="space-y-4">
+            {/* Nom de l'option */}
+            <div className="space-y-1">
+              <Label>Nom de l'option <span className="text-slate-400 font-normal">(ex: CPU, RAM, Raid Controller)</span></Label>
+              <Input
+                value={optionName}
+                onChange={(e) => setOptionName(e.target.value)}
+                placeholder="Ex: CPU"
+              />
+            </div>
 
-            {optionValues.map((entry, index) => (
-              <div key={index} className="grid grid-cols-[1fr_120px_100px] gap-2">
-                <Input
-                  value={entry.value} placeholder="Valeur"
-                  onChange={(e) => setOptionValues((prev) => { const next = [...prev]; next[index] = { ...next[index], value: e.target.value }; return next })}
-                />
-                <Input
-                  type="number" step="0.01" value={entry.price} placeholder="Prix"
-                  onChange={(e) => setOptionValues((prev) => { const next = [...prev]; next[index] = { ...next[index], price: e.target.value }; return next })}
-                />
-                <Input
-                  type="number" min="1" value={entry.quantity} placeholder="Qté"
-                  onChange={(e) => setOptionValues((prev) => { const next = [...prev]; next[index] = { ...next[index], quantity: e.target.value }; return next })}
-                />
+            {/* ── Toggle mode ─────────────────────────────────────────────── */}
+            <div className="space-y-2">
+              <Label>Mode d'affichage</Label>
+              <div className="flex gap-1 rounded-lg border border-slate-200 bg-slate-50 p-1 w-fit">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setOptionUseGroups(false)
+                    setOptionGroupValues([{ group_name: '', products: [''] }])
+                  }}
+                  className={`rounded-md px-4 py-1.5 text-xs font-medium transition ${
+                    !optionUseGroups
+                      ? 'bg-white text-slate-900 shadow-sm'
+                      : 'text-slate-500 hover:text-slate-700'
+                  }`}
+                >
+                  📋 Sans groupes
+                  <span className="ml-1 text-slate-400 font-normal">(ex: Raid Controller)</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setOptionUseGroups(true)}
+                  className={`rounded-md px-4 py-1.5 text-xs font-medium transition ${
+                    optionUseGroups
+                      ? 'bg-white text-slate-900 shadow-sm'
+                      : 'text-slate-500 hover:text-slate-700'
+                  }`}
+                >
+                  🗂️ Avec groupes
+                  <span className="ml-1 text-slate-400 font-normal">(ex: CPU par cores)</span>
+                </button>
               </div>
-            ))}
+            </div>
 
+            {/* ── Checkbox "Aucun" ────────────────────────────────────────── */}
+            <div className="flex items-center gap-3 rounded border border-slate-200 bg-slate-50 px-3 py-2">
+              <input
+                id="allow-none"
+                type="checkbox"
+                checked={optionAllowNone}
+                onChange={(e) => setOptionAllowNone(e.target.checked)}
+                className="h-4 w-4 accent-[#2ad1a4]"
+              />
+              <label htmlFor="allow-none" className="text-sm text-slate-700 cursor-pointer select-none">
+                Autoriser <strong>"Aucun"</strong> — affiche un choix "Aucun / Inclus" en tête de liste sur le configurateur
+              </label>
+            </div>
+
+            {/* Recherche produits standards */}
+            <div className="space-y-1">
+              <Label>Rechercher un produit standard</Label>
+              <Input
+                value={standardProductSearch}
+                onChange={(e) => setStandardProductSearch(e.target.value)}
+                placeholder="Ex: Cisco, E5-2637, RAID 530..."
+              />
+            </div>
+
+            {/* ── Lignes de valeurs ────────────────────────────────────────── */}
+            <div className="space-y-3 rounded border p-3">
+              <p className="text-sm font-medium text-slate-700">
+                {optionUseGroups
+                  ? 'Groupes de produits — chaque groupe peut contenir plusieurs produits'
+                  : 'Produits standards à lister'}
+              </p>
+
+              {optionUseGroups ? (
+                // Mode avec groupes - structure groupée
+                <div className="space-y-4">
+                  {optionGroupValues.map((group, groupIndex) => (
+                    <div key={groupIndex} className="rounded border border-slate-200 p-3 space-y-3">
+                      <div className="flex items-center justify-between gap-2">
+                        <div className="flex-1">
+                          <Label className="text-xs">Nom du groupe</Label>
+                          <Input
+                            value={group.group_name}
+                            placeholder="Ex: 4-Core, 2-Core, SSD, HDD..."
+                            onChange={(e) => setOptionGroupValues((prev) => {
+                              const next = [...prev]
+                              next[groupIndex] = { ...next[groupIndex], group_name: e.target.value }
+                              return next
+                            })}
+                          />
+                        </div>
+                        <Button
+                          type="button" variant="outline" size="sm"
+                          onClick={() => setOptionGroupValues((prev) =>
+                            prev.length > 1 ? prev.filter((_, i) => i !== groupIndex) : [{ group_name: '', products: [''] }]
+                          )}
+                          className="mt-5"
+                        >
+                          Supprimer le groupe
+                        </Button>
+                      </div>
+                      
+                      <div className="space-y-2">
+                        <Label className="text-xs">Produits dans ce groupe</Label>
+                        {group.products.map((productId, productIndex) => (
+                          <div key={productIndex} className="flex gap-2 items-start">
+                            <div className="flex-1">
+                              <StandardProductSelect
+                                value={productId}
+                                onChange={(v) => setOptionGroupValues((prev) => {
+                                  const next = [...prev]
+                                  next[groupIndex].products[productIndex] = v
+                                  return next
+                                })}
+                              />
+                              {productId && (() => {
+                                const selected = products.find((p) => String(p.id) === productId)
+                                if (!selected) return null
+                                return (
+                                  <p className="text-xs text-slate-500 mt-0.5">
+                                    {selected.in_stock
+                                      ? <span className="text-green-600">✓ En stock ({selected.stock_qty})</span>
+                                      : <span className="text-red-500">✗ Rupture de stock</span>
+                                    }
+                                    {' · '}Prix : {Number(selected.base_price).toFixed(2)} EUR
+                                  </p>
+                                )
+                              })()}
+                            </div>
+                            <Button
+                              type="button" variant="outline" size="sm"
+                              onClick={() => setOptionGroupValues((prev) => {
+                                const next = [...prev]
+                                next[groupIndex].products = next[groupIndex].products.filter((_, i) => i !== productIndex)
+                                if (next[groupIndex].products.length === 0) {
+                                  next[groupIndex].products = ['']
+                                }
+                                return next
+                              })}
+                              className="mt-0"
+                            >
+                              ✕
+                            </Button>
+                          </div>
+                        ))}
+                        <Button
+                          type="button" variant="outline" size="sm"
+                          onClick={() => setOptionGroupValues((prev) => {
+                            const next = [...prev]
+                            next[groupIndex].products.push('')
+                            return next
+                          })}
+                        >
+                          + Ajouter un produit dans ce groupe
+                        </Button>
+                      </div>
+                    </div>
+                  ))}
+                  
+                  <Button
+                    type="button" variant="outline"
+                    onClick={() => setOptionGroupValues((prev) => [...prev, { group_name: '', products: [''] }])}
+                  >
+                    + Ajouter un groupe
+                  </Button>
+                </div>
+              ) : (
+                // Mode sans groupes - simple liste
+                <div className="space-y-2">
+                  {optionSimpleValues.map((entry, index) => (
+                    <div key={index} className="flex gap-2 items-start">
+                      <div className="flex-1">
+                        <StandardProductSelect
+                          value={entry.standard_product_id}
+                          onChange={(v) => setOptionSimpleValues((prev) => {
+                            const next = [...prev]
+                            next[index] = { standard_product_id: v }
+                            return next
+                          })}
+                        />
+                        {entry.standard_product_id && (() => {
+                          const selected = products.find((p) => String(p.id) === entry.standard_product_id)
+                          if (!selected) return null
+                          return (
+                            <p className="text-xs text-slate-500 mt-0.5">
+                              {selected.in_stock
+                                ? <span className="text-green-600">✓ En stock ({selected.stock_qty})</span>
+                                : <span className="text-red-500">✗ Rupture de stock</span>
+                              }
+                              {' · '}Prix : {Number(selected.base_price).toFixed(2)} EUR
+                            </p>
+                          )
+                        })()}
+                      </div>
+                      <Button
+                        type="button" variant="outline" size="sm"
+                        onClick={() => setOptionSimpleValues((prev) =>
+                          prev.length > 1 ? prev.filter((_, i) => i !== index) : [{ standard_product_id: '' }]
+                        )}
+                      >
+                        ✕
+                      </Button>
+                    </div>
+                  ))}
+                  
+                  <Button
+                    type="button" variant="outline"
+                    onClick={() => setOptionSimpleValues((prev) => [...prev, { standard_product_id: '' }])}
+                  >
+                    + Ajouter un produit
+                  </Button>
+                </div>
+              )}
+            </div>
+
+            {/* Actions */}
             <div className="flex gap-2">
-              <Button variant="outline" onClick={() => setOptionValues((prev) => [...prev, { value: '', price: '0', quantity: '1' }])}>
-                Ajouter une ligne
-              </Button>
               {editingOptionId && (
-                <Button variant="outline" onClick={() => { setEditingOptionId(null); setOptionName(''); setOptionValues([{ value: '', price: '0', quantity: '1' }]) }}>
+                <Button variant="outline" onClick={resetOptionForm}>
                   Annuler édition
                 </Button>
               )}
-              <Button onClick={addOption}>{editingOptionId ? 'Enregistrer option' : 'Ajouter option'}</Button>
+              <Button onClick={addOption}>
+                {editingOptionId ? 'Enregistrer les modifications' : "Ajouter l'option"}
+              </Button>
             </div>
 
+            {/* Liste des options existantes */}
             <div className="rounded border p-3">
               <p className="mb-2 text-sm font-medium text-slate-700">Options existantes</p>
+              {(!optionDialogProduct?.configuration_options.length) && (
+                <p className="text-sm text-slate-400">Aucune option configurée pour ce produit.</p>
+              )}
               <div className="space-y-2">
                 {optionDialogProduct?.configuration_options.map((option) => (
-                  <div key={option.id} className="rounded border p-2 text-sm">
-                    <div className="flex items-center justify-between gap-2">
-                      <p className="font-medium">{option.name}</p>
+                  <div key={option.id} className="rounded border p-3 text-sm">
+                    <div className="flex items-center justify-between gap-2 mb-2">
+                      <div className="flex items-center gap-2">
+                        <p className="font-medium text-slate-800">📋 {option.name}</p>
+                        <span className="rounded-full bg-slate-100 px-2 py-0.5 text-xs text-slate-500">
+                          {option.use_groups ? '🗂️ Groupes' : '📋 Liste'}
+                        </span>
+                        {option.allow_none && (
+                          <span className="rounded-full bg-emerald-50 px-2 py-0.5 text-xs text-emerald-600">
+                            ✓ Aucun
+                          </span>
+                        )}
+                      </div>
                       <div className="flex gap-2">
                         <Button variant="outline" size="sm" onClick={() => startEditOption(option)}>Modifier</Button>
                         <Button variant="outline" size="sm" onClick={() => deleteOption(option.id)}>Supprimer</Button>
                       </div>
                     </div>
-                    <p className="text-xs text-slate-500">
-                      {option.values.map((v) => `${v.value} x${v.quantity} (+${Number(v.price).toFixed(2)})`).join(', ')}
-                    </p>
+                    <div className="space-y-1">
+                      {option.values.map((v) => (
+                        <div key={v.id} className="flex items-center gap-2 rounded bg-slate-50 px-2 py-1 text-xs text-slate-600">
+                          {option.use_groups && v.group_name && (
+                            <>
+                              <span className="font-medium text-slate-700">{v.group_name}</span>
+                              <span className="text-slate-400">→</span>
+                            </>
+                          )}
+                          <span>{v.standard_product.brand.name} — {v.standard_product.name}</span>
+                          <span className="ml-auto text-slate-500">{Number(v.price).toFixed(2)} EUR</span>
+                          <span className={v.standard_product.in_stock ? 'text-green-600' : 'text-red-500'}>
+                            {v.standard_product.in_stock ? '✓' : '✗'}
+                          </span>
+                        </div>
+                      ))}
+                    </div>
                   </div>
                 ))}
               </div>

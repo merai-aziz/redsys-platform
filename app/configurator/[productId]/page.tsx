@@ -26,7 +26,16 @@ export default async function ConfiguratorPage({ params }: PageProps) {
       },
       configuration_options: {
         include: {
-          values: true,
+          values: {
+            include: {
+              standard_product: {
+                include: {
+                  brand: true,
+                  family: true,
+                },
+              },
+            },
+          },
         },
         orderBy: { id: 'asc' },
       },
@@ -64,14 +73,28 @@ export default async function ConfiguratorPage({ params }: PageProps) {
             stockQty={product.stock_qty}
             inStock={product.in_stock}
             poe={product.poe}
-            options={product.configuration_options.map((opt: typeof product.configuration_options[0]) => ({
+            options={product.configuration_options.map((opt) => ({
               id: opt.id,
               name: opt.name,
-              values: opt.values.map((v: typeof opt.values[0]) => ({
+              allow_none: opt.allow_none,
+              use_groups: opt.use_groups,
+              values: opt.values.map((v) => ({
                 id: v.id,
-                value: v.value,
+                // value = group_name pour rétrocompat (utilisé par groupValues comme clé)
+                value: v.group_name ?? null,
+                // group_name explicite — titre de section affiché, jamais label du bouton
+                group_name: v.group_name ?? null,
                 price: String(v.price),
                 quantity: v.quantity,
+                standard_product: {
+                  id: v.standard_product.id,
+                  // name = toujours affiché dans le bouton cliquable
+                  name: v.standard_product.name,
+                  brand_name: v.standard_product.brand.name,
+                  family_name: v.standard_product.family.name,
+                  in_stock: v.standard_product.in_stock,
+                  stock_qty: v.standard_product.stock_qty,
+                },
               })),
             }))}
           />
