@@ -1,3 +1,4 @@
+// /app/api/admin/users/[id]/route.ts
 import { NextRequest, NextResponse } from 'next/server'
 import { jwtVerify } from 'jose'
 import { prisma } from '@/lib/prisma'
@@ -28,7 +29,7 @@ export async function PUT(
   }
 
   try {
-    const { id } = await context.params   // ✅ FIX ICI
+    const { id } = await context.params
 
     if (!id) {
       return NextResponse.json({ error: 'ID manquant' }, { status: 400 })
@@ -36,7 +37,7 @@ export async function PUT(
 
     const target = await prisma.user.findUnique({
       where: { id },
-      select: { userRole: true }
+      select: { userRole: true },
     })
 
     if (!target) {
@@ -57,12 +58,24 @@ export async function PUT(
       adresse,
       departement,
       companyName,
-      isActive
+      isActive,
     } = await req.json()
 
     if (userRole && userRole !== 'EMPLOYEE') {
       return NextResponse.json({ error: 'Le rôle doit rester EMPLOYEE' }, { status: 403 })
     }
+
+    // ── Vérification unicité email avant update ──────────────────────────────
+    if (email) {
+      const emailConflict = await prisma.user.findFirst({
+        where: { email, NOT: { id } },
+        select: { id: true },
+      })
+      if (emailConflict) {
+        return NextResponse.json({ error: 'Cet email est déjà utilisé par un autre compte' }, { status: 409 })
+      }
+    }
+    // ─────────────────────────────────────────────────────────────────────────
 
     const data: Record<string, unknown> = {
       firstName,
@@ -73,7 +86,7 @@ export async function PUT(
       adresse,
       departement,
       companyName,
-      isActive
+      isActive,
     }
 
     if (password) {
@@ -89,8 +102,8 @@ export async function PUT(
         lastName: true,
         email: true,
         userRole: true,
-        isActive: true
-      }
+        isActive: true,
+      },
     })
 
     return NextResponse.json({ user })
@@ -111,7 +124,7 @@ export async function DELETE(
   }
 
   try {
-    const { id } = await context.params   // ✅ FIX ICI
+    const { id } = await context.params
 
     if (!id) {
       return NextResponse.json({ error: 'ID manquant' }, { status: 400 })
@@ -119,7 +132,7 @@ export async function DELETE(
 
     const target = await prisma.user.findUnique({
       where: { id },
-      select: { userRole: true }
+      select: { userRole: true },
     })
 
     if (!target) {
@@ -130,9 +143,7 @@ export async function DELETE(
       return NextResponse.json({ error: 'Seuls les comptes EMPLOYEE sont supprimables' }, { status: 403 })
     }
 
-    await prisma.user.delete({
-      where: { id }
-    })
+    await prisma.user.delete({ where: { id } })
 
     return NextResponse.json({ message: 'Utilisateur supprimé' })
   } catch (e) {

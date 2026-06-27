@@ -21,10 +21,32 @@ interface CatalogModel {
   filterValues: Array<{ filterId: number; filterName: string; valueId: number; value: string }>
 }
 
+interface ConfigOptionValue {
+  id: number
+  // value = group_name pour rétrocompat (clé de groupement legacy)
+  value: string | null
+  // group_name explicite — titre de section affiché (ex: "4-Core"), jamais le nom du bouton
+  group_name?: string | null
+  price: number
+  quantity: number
+  // Détails du produit standard rattaché à cette valeur — c'est lui qui fournit
+  // le libellé réellement affiché sur le bouton (ex: "LENOVO - Intel Xeon E-2134...")
+  standard_product?: {
+    id: number
+    name: string
+    brand_name?: string
+    family_name?: string
+    in_stock?: boolean
+    stock_qty?: number
+  } | null
+}
+
 interface ConfigOption {
   id: number
   name: string
-  values: Array<{ id: number; value: string; price: number; quantity: number }>
+  allow_none?: boolean
+  use_groups?: boolean
+  values: ConfigOptionValue[]
 }
 
 interface ProductDetail {
@@ -32,6 +54,7 @@ interface ProductDetail {
   name: string
   brandName: string
   categoryName: string
+  familyName: string
   basePrice: number
   image: string | null
   inStock: boolean
@@ -53,7 +76,6 @@ interface NeedField {
   unit?: string
   options?: string[]
   defaultValue: number | string
-  // weight: how much this need impacts each metric (0-1)
   impact: {
     cpu?: number
     ram?: number
@@ -244,7 +266,7 @@ const DOMAIN_NEEDS: Record<DomainCode, NeedField[]> = {
 // ─── Simulation engine ────────────────────────────────────────────────────────
 
 type NeedsState = Record<string, number | string>
-type OptionsState = Record<number, number | null> // optionId -> valueIndex | null
+type OptionsState = Record<number, number | null>
 
 interface Metrics {
   cpu: number
@@ -267,15 +289,36 @@ function inferDomainCode(domainId: string, categoryName: string, familyName: str
 
 function selectWeightForOption(optName: string, domainCode: DomainCode): Partial<Metrics> {
   const n = optName.toLowerCase()
-  if (n.includes('cpu') || n.includes('processeur') || n.includes('proc')) return { cpu: 0.7, temp: 0.4, power: 0.3 }
-  if (n.includes('ram') || n.includes('mémoire') || n.includes('memoire') || n.includes('memory')) return { ram: 0.7, power: 0.2 }
-  if (n.includes('disk') || n.includes('disque') || n.includes('ssd') || n.includes('hdd') || n.includes('nvme')) return { diskIO: 0.7, temp: 0.2, power: 0.25 }
-  if (n.includes('réseau') || n.includes('network') || n.includes('nic') || n.includes('port') || n.includes('10g') || n.includes('25g') || n.includes('100g')) return { bandwidth: 0.7, power: 0.15 }
-  if (n.includes('alim') || n.includes('power') || n.includes('psu') || n.includes('watt')) return { power: 0.6, temp: 0.2 }
-  if (n.includes('cache')) return { diskIO: 0.4, ram: 0.3, cpu: 0.15 }
-  if (n.includes('gpu') || n.includes('accél')) return { cpu: 0.5, power: 0.6, temp: 0.5 }
-  // default: small balanced impact
-  return { cpu: 0.15, ram: 0.15, power: 0.1 }
+  const domainMultiplier = domainCode === 'SERVER' ? 1.2 : domainCode === 'STORAGE' ? 1.1 : 1.0
+  
+  if (n.includes('cpu') || n.includes('processeur') || n.includes('proc') || n.includes('core')) {
+    return { cpu: 0.6 * domainMultiplier, temp: 0.3 * domainMultiplier, power: 0.25 * domainMultiplier }
+  }
+  if (n.includes('ram') || n.includes('mémoire') || n.includes('memoire') || n.includes('memory') || n.includes('ddr')) {
+    return { ram: 0.65 * domainMultiplier, power: 0.15 * domainMultiplier }
+  }
+  if (n.includes('disk') || n.includes('disque') || n.includes('ssd') || n.includes('hdd') || n.includes('nvme') || n.includes('sata') || n.includes('sas')) {
+    return { diskIO: 0.65 * domainMultiplier, temp: 0.2 * domainMultiplier, power: 0.2 * domainMultiplier }
+  }
+  if (n.includes('réseau') || n.includes('network') || n.includes('nic') || n.includes('port') || n.includes('10g') || n.includes('25g') || n.includes('100g') || n.includes('ethernet')) {
+    return { bandwidth: 0.65 * domainMultiplier, power: 0.15 * domainMultiplier }
+  }
+  if (n.includes('alim') || n.includes('power') || n.includes('psu') || n.includes('watt') || n.includes('alimentation')) {
+    return { power: 0.6 * domainMultiplier, temp: 0.2 * domainMultiplier }
+  }
+  if (n.includes('cache') || n.includes('buffer')) {
+    return { diskIO: 0.3 * domainMultiplier, ram: 0.25 * domainMultiplier, cpu: 0.15 * domainMultiplier }
+  }
+  if (n.includes('gpu') || n.includes('accél') || n.includes('acceleration') || n.includes('cuda')) {
+    return { cpu: 0.4 * domainMultiplier, power: 0.5 * domainMultiplier, temp: 0.4 * domainMultiplier }
+  }
+  if (n.includes('raid') || n.includes('redondance')) {
+    return { diskIO: 0.3 * domainMultiplier, cpu: 0.2 * domainMultiplier, power: 0.2 * domainMultiplier }
+  }
+  if (n.includes('virtual') || n.includes('hypervisor') || n.includes('vm')) {
+    return { cpu: 0.5 * domainMultiplier, ram: 0.3 * domainMultiplier, power: 0.2 * domainMultiplier }
+  }
+  return { cpu: 0.15 * domainMultiplier, ram: 0.15 * domainMultiplier, power: 0.1 * domainMultiplier }
 }
 
 function computeMetrics(
@@ -287,7 +330,6 @@ function computeMetrics(
   const fields = DOMAIN_NEEDS[domainCode]
   let metricAccum: Metrics = { cpu: 0, ram: 0, temp: 0, bandwidth: 0, diskIO: 0, power: 0 }
 
-  // 1. Compute needs contribution
   fields.forEach((field) => {
     const val = needs[field.id] ?? field.defaultValue
     let normalizedVal = 0
@@ -295,47 +337,59 @@ function computeMetrics(
     if (field.type === 'slider') {
       const min = field.min ?? 0
       const max = field.max ?? 100
-      normalizedVal = Math.max(0, Math.min(1, (Number(val) - min) / Math.max(1, max - min)))
+      if (max > 1000) {
+        const logMin = Math.log(min + 1)
+        const logMax = Math.log(max + 1)
+        const logVal = Math.log(Number(val) + 1)
+        normalizedVal = Math.max(0, Math.min(1, (logVal - logMin) / Math.max(0.1, logMax - logMin)))
+      } else {
+        normalizedVal = Math.max(0, Math.min(1, (Number(val) - min) / Math.max(1, max - min)))
+      }
     } else if (field.type === 'select' && field.options) {
       const idx = field.options.indexOf(String(val))
-      normalizedVal = idx <= 0 ? 0 : idx / (field.options.length - 1)
+      normalizedVal = idx <= 0 ? 0 : Math.pow(idx / (field.options.length - 1), 0.8)
     }
 
     const keys: (keyof Metrics)[] = ['cpu', 'ram', 'temp', 'bandwidth', 'diskIO', 'power']
     keys.forEach((k) => {
       const w = field.impact[k] ?? 0
-      metricAccum[k] += normalizedVal * w * 80
+      metricAccum[k] += normalizedVal * w * 60
     })
   })
 
-  // 2. Compute options contribution
   product.options.forEach((opt) => {
     const selectedIdx = optionsState[opt.id]
     if (selectedIdx === null || selectedIdx === undefined) return
     const n = opt.values.length - 1
     if (n <= 0) return
-    const optNorm = selectedIdx / n
+    
+    const optNorm = Math.pow(selectedIdx / n, 0.7)
     const weights = selectWeightForOption(opt.name, domainCode)
+    const impactFactor = 35
+    
     const keys: (keyof Metrics)[] = ['cpu', 'ram', 'temp', 'bandwidth', 'diskIO', 'power']
     keys.forEach((k) => {
       const w = (weights as any)[k] ?? 0
-      metricAccum[k] += optNorm * w * 45
+      metricAccum[k] += optNorm * w * impactFactor
     })
   })
 
-  // 3. Clamp to [5, 100]
   const keys: (keyof Metrics)[] = ['cpu', 'ram', 'temp', 'bandwidth', 'diskIO', 'power']
   keys.forEach((k) => {
-    metricAccum[k] = Math.min(100, Math.max(5, metricAccum[k]))
+    if (k === 'temp') {
+      metricAccum[k] = Math.min(100, Math.max(10, metricAccum[k]))
+    } else {
+      metricAccum[k] = Math.min(95, Math.max(5, metricAccum[k]))
+    }
   })
 
   return metricAccum
 }
 
 function getStatus(m: Metrics): 'healthy' | 'warning' | 'critical' {
-  const avg = (m.cpu + m.temp + m.ram) / 3
-  if (avg > 78) return 'critical'
-  if (avg > 55) return 'warning'
+  const weightedAvg = (m.cpu * 0.35 + m.ram * 0.3 + m.temp * 0.35)
+  if (weightedAvg > 82) return 'critical'
+  if (weightedAvg > 60) return 'warning'
   return 'healthy'
 }
 
@@ -435,7 +489,6 @@ function Visual3D({
           }
         </div>
       </div>
-      {/* HUD metrics */}
       <div style={{ position: 'absolute', top: 8, left: 8, display: 'flex', flexDirection: 'column', gap: 4, pointerEvents: 'none' }}>
         {[{ label: 'CPU', value: metrics.cpu, color: '#534ab7' }, { label: 'RAM', value: metrics.ram, color: '#1d6e9e' }, { label: 'TEMP', value: metrics.temp, color: metrics.temp > 75 ? '#e24b4a' : '#ef9f27' }].map((m) => (
           <div key={m.label} style={{ display: 'flex', alignItems: 'center', gap: 5, background: 'rgba(10,10,9,0.72)', borderRadius: 5, padding: '2px 7px', backdropFilter: 'blur(6px)', border: '0.5px solid #2c2c2a' }}>
@@ -554,61 +607,144 @@ function OptionsPanel({
     return <p style={{ fontSize: 12, color: '#444441' }}>Aucune option configurable pour ce produit.</p>
   }
 
+  // Fonction pour gérer le toggle avec désélection
+  const handleToggle = (optId: number, valueIdx: number) => {
+    const currentSelected = optionsState[optId]
+    // Si on clique sur la même option déjà sélectionnée, on la désélectionne
+    if (currentSelected === valueIdx) {
+      onToggle(optId, null)
+    } else {
+      onToggle(optId, valueIdx)
+    }
+  }
+
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: 18 }}>
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 24 }}>
       {product.options.map((opt) => {
         const selectedIdx = optionsState[opt.id] ?? null
+
+        // Grouper les valeurs par group_name (titre de section, ex: "4-Core").
+        // On utilise group_name en priorité, value en repli (rétrocompat),
+        // et le nom de l'option elle-même en dernier recours.
+        const groupedValues: Record<string, ConfigOptionValue[]> = {}
+        opt.values.forEach((v) => {
+          const rawGroup = v.group_name ?? v.value
+          const groupName = rawGroup && rawGroup.trim() !== '' ? rawGroup : (opt.name || 'Options')
+
+          if (!groupedValues[groupName]) {
+            groupedValues[groupName] = []
+          }
+          groupedValues[groupName].push(v)
+        })
+
         return (
           <div key={opt.id}>
-            <div style={{ fontSize: 10, color: '#5f5e5a', letterSpacing: '0.1em', marginBottom: 7, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-              <span>{opt.name.toUpperCase()}</span>
-              {selectedIdx !== null && (
-                <button
-                  onClick={() => onToggle(opt.id, null)}
-                  style={{ background: 'none', border: 'none', color: '#444441', cursor: 'pointer', fontSize: 9, padding: 0, fontFamily: 'inherit' }}
-                >
-                  ✕ Décocher
-                </button>
-              )}
+            {/* Nom de l'option (ex: CPU) */}
+            <div style={{ 
+              fontSize: 12, 
+              color: '#1d9e75', 
+              letterSpacing: '0.1em', 
+              marginBottom: 12,
+              fontWeight: 600
+            }}>
+              {opt.name.toUpperCase()}
             </div>
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 5 }}>
-              {opt.values.map((v, vi) => {
-                const isSelected = selectedIdx === vi
-                return (
-                  <label
-                    key={v.id}
-                    style={{
-                      display: 'flex', alignItems: 'center', gap: 8,
-                      background: isSelected ? 'rgba(29,158,117,0.08)' : '#0f0f0e',
-                      border: `0.5px solid ${isSelected ? '#1d9e75' : '#1e1e1c'}`,
-                      borderRadius: 7, padding: '6px 10px', cursor: 'pointer',
-                      transition: 'all 0.18s',
-                    }}
-                  >
-                    <input
-                      type="radio"
-                      name={`opt-${opt.id}`}
-                      checked={isSelected}
-                      onChange={() => onToggle(opt.id, vi)}
-                      style={{ accentColor: '#1d9e75', width: 12, height: 12, flexShrink: 0 }}
-                    />
-                    <div style={{ flex: 1, minWidth: 0 }}>
-                      <div style={{ fontSize: 11, color: isSelected ? '#e1f5ee' : '#d3d1c7', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{v.value}</div>
-                      {v.price > 0 && (
-                        <div style={{ fontSize: 9, color: '#1d9e75', marginTop: 1 }}>+{v.price.toLocaleString('fr-FR', { style: 'currency', currency: 'EUR' })}</div>
-                      )}
-                    </div>
-                    {isSelected && <span style={{ fontSize: 8, color: '#1d9e75', flexShrink: 0 }}>●</span>}
-                  </label>
-                )
-              })}
-            </div>
+            
+            {/* Sous-groupes (ex: 4-CORE) */}
+            {Object.entries(groupedValues).map(([groupName, values]) => (
+              <div key={`${opt.id}-${groupName}`} style={{ marginBottom: 12 }}>
+                <div style={{ 
+                  fontSize: 10, 
+                  color: '#888780', 
+                  letterSpacing: '0.08em',
+                  marginBottom: 8,
+                  paddingLeft: 4,
+                  fontWeight: 500
+                }}>
+                  {groupName.toUpperCase()}
+                </div>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+                  {values.map((v) => {
+                    // Trouver l'index réel dans le tableau original (référence stable pour le state)
+                    const realIndex = opt.values.findIndex(ov => ov.id === v.id)
+                    const isSelected = selectedIdx === realIndex
+                    // Le nom affiché est toujours le nom du produit standard,
+                    // jamais le group_name ni l'id brut.
+                    const displayName = v.standard_product?.name ?? v.value ?? v.id.toString()
+
+                    return (
+                      <div
+                        key={`${opt.id}-${v.id}`}
+                        style={{
+                          display: 'flex', 
+                          alignItems: 'center', 
+                          gap: 10,
+                          background: isSelected ? 'rgba(29,158,117,0.08)' : '#0f0f0e',
+                          border: `0.5px solid ${isSelected ? '#1d9e75' : '#1e1e1c'}`,
+                          borderRadius: 6, 
+                          padding: '6px 10px', 
+                          cursor: 'pointer',
+                          transition: 'all 0.15s',
+                        }}
+                        onClick={() => handleToggle(opt.id, realIndex)}
+                      >
+                        <input
+                          type="radio"
+                          name={`option-${opt.id}`}
+                          checked={isSelected}
+                          onChange={() => handleToggle(opt.id, realIndex)}
+                          style={{ 
+                            accentColor: '#1d9e75', 
+                            width: 13, 
+                            height: 13, 
+                            flexShrink: 0,
+                            cursor: 'pointer'
+                          }}
+                        />
+                        <div style={{ flex: 1, minWidth: 0 }}>
+                          <div style={{ 
+                            fontSize: 10.5, 
+                            color: isSelected ? '#e1f5ee' : '#d3d1c7',
+                            lineHeight: 1.3,
+                          }}>
+                            {displayName}
+                          </div>
+                        </div>
+                        {v.price > 0 && (
+                          <div style={{ 
+                            fontSize: 10.5, 
+                            color: isSelected ? '#1d9e75' : '#888780',
+                            fontWeight: isSelected ? 500 : 400,
+                            flexShrink: 0,
+                            marginLeft: 8
+                          }}>
+                            {v.price.toLocaleString('fr-FR', { style: 'currency', currency: 'EUR' })}
+                          </div>
+                        )}
+                        {isSelected && (
+                          <span style={{ 
+                            fontSize: 11, 
+                            color: '#1d9e75', 
+                            flexShrink: 0,
+                            marginLeft: 4
+                          }}>
+                            ✓
+                          </span>
+                        )}
+                      </div>
+                    )
+                  })}
+                </div>
+              </div>
+            ))}
           </div>
         )
       })}
     </div>
   )
 }
+
+
 
 // ─── Main page ────────────────────────────────────────────────────────────────
 
@@ -624,18 +760,20 @@ export default function SimulationPage() {
   const [selectedProduct, setSelectedProduct] = useState<ProductDetail | null>(null)
   const [loadingDetail, setLoadingDetail] = useState(false)
 
-  // Step 2 filters
   const [brandFilter, setBrandFilter] = useState<string>('ALL')
   const [searchQuery, setSearchQuery] = useState<string>('')
 
-  // Simulation states
   const [needs, setNeeds] = useState<NeedsState>({})
+  const [needsPerDomain, setNeedsPerDomain] = useState<Record<DomainCode, NeedsState>>({
+    SERVER: {},
+    STORAGE: {},
+    NETWORK: {}
+  })
   const [optionsState, setOptionsState] = useState<OptionsState>({})
 
   const [frame, setFrame] = useState(0)
   const rafRef = useRef<number | null>(null)
 
-  // Active panel in simulation (mobile-friendly tab)
   const [activePanel, setActivePanel] = useState<'needs' | 'options'>('needs')
 
   useEffect(() => {
@@ -660,18 +798,19 @@ export default function SimulationPage() {
 
   const byDomain = useMemo<Record<DomainCode, CatalogModel[]>>(() => {
     const map: Record<DomainCode, CatalogModel[]> = { SERVER: [], STORAGE: [], NETWORK: [] }
-    configProducts.forEach((m) => { map[inferDomainCode(m.domainId, m.categoryName, m.familyName)].push(m) })
+    configProducts.forEach((m) => {
+      const code = inferDomainCode(m.domainId, m.categoryName, m.familyName)
+      map[code].push(m)
+    })
     return map
   }, [configProducts])
 
-  // Brands for active domain
   const brandsForDomain = useMemo<string[]>(() => {
     const models = byDomain[activeDomain]
     const set = new Set(models.map((m) => m.brandName).filter(Boolean))
     return Array.from(set).sort()
   }, [byDomain, activeDomain])
 
-  // Filtered models
   const filteredModels = useMemo(() => {
     let models = byDomain[activeDomain]
     if (brandFilter !== 'ALL') models = models.filter((m) => m.brandName === brandFilter)
@@ -689,18 +828,29 @@ export default function SimulationPage() {
       if (!res.ok) throw new Error('err')
       const data = await res.json()
       const opts: ConfigOption[] = Array.isArray(data.options) ? data.options : []
-      setSelectedProduct({
-        id: m.id, name: m.name, brandName: m.brandName,
-        categoryName: m.categoryName, basePrice: m.basePrice,
-        image: m.image, inStock: (m.stockQty ?? 0) > 0,
-        domainId: m.domainId, options: opts,
-      })
-      // Init needs with defaults
+      
       const domCode = inferDomainCode(m.domainId, m.categoryName, m.familyName)
+      
+      setSelectedProduct({
+        id: m.id,
+        name: m.name,
+        brandName: m.brandName,
+        categoryName: m.categoryName,
+        familyName: m.familyName,
+        basePrice: m.basePrice,
+        image: m.image,
+        inStock: (m.stockQty ?? 0) > 0,
+        domainId: m.domainId,
+        options: opts,
+      })
+      
+      const savedNeeds = needsPerDomain[domCode] || {}
       const initNeeds: NeedsState = {}
-      DOMAIN_NEEDS[domCode].forEach((f) => { initNeeds[f.id] = f.defaultValue })
+      DOMAIN_NEEDS[domCode].forEach((f) => {
+        initNeeds[f.id] = savedNeeds[f.id] ?? f.defaultValue
+      })
       setNeeds(initNeeds)
-      // Init options all unchecked
+      
       const initOpts: OptionsState = {}
       opts.forEach((o) => { initOpts[o.id] = null })
       setOptionsState(initOpts)
@@ -713,7 +863,7 @@ export default function SimulationPage() {
   }
 
   const domainCode = selectedProduct
-    ? inferDomainCode(selectedProduct.domainId, selectedProduct.categoryName, selectedProduct.brandName)
+    ? inferDomainCode(selectedProduct.domainId, selectedProduct.categoryName, selectedProduct.familyName)
     : activeDomain
 
   const metrics = useMemo<Metrics>(() => {
@@ -728,7 +878,6 @@ export default function SimulationPage() {
     critical: { border: '#993c1d', glow: '0 0 24px rgba(226,75,74,0.14)', dot: '#e24b4a' },
   }[status]
 
-  // Checked options summary
   const checkedOptions = useMemo(() => {
     if (!selectedProduct) return []
     return selectedProduct.options
@@ -736,7 +885,9 @@ export default function SimulationPage() {
         const idx = optionsState[opt.id]
         if (idx === null || idx === undefined) return null
         const val = opt.values[idx]
-        return val ? { optName: opt.name, value: val.value, price: val.price } : null
+        if (!val) return null
+        const displayValue = val.standard_product?.name ?? val.value ?? val.id.toString()
+        return { optName: opt.name, value: displayValue, price: val.price }
       })
       .filter(Boolean) as { optName: string; value: string; price: number }[]
   }, [selectedProduct, optionsState])
@@ -747,6 +898,17 @@ export default function SimulationPage() {
     page: { minHeight: '100vh', background: '#0a0a09', color: '#d3d1c7', fontFamily: "ui-monospace,'SFMono-Regular',monospace" } as React.CSSProperties,
     hdr: { borderBottom: '0.5px solid #1e1e1c', padding: '13px 28px', display: 'flex', alignItems: 'center', justifyContent: 'space-between' } as React.CSSProperties,
     card: { background: '#0f0f0e', border: '0.5px solid #1e1e1c', borderRadius: 14, padding: '16px 18px' } as React.CSSProperties,
+  }
+
+  const handleNeedChange = (id: string, val: number | string) => {
+    setNeeds((prev) => {
+      const newNeeds = { ...prev, [id]: val }
+      setNeedsPerDomain((prevDomains) => ({
+        ...prevDomains,
+        [domainCode]: newNeeds
+      }))
+      return newNeeds
+    })
   }
 
   // ── STEP 1 ─────────────────────────────────────────────────────────────────
@@ -826,9 +988,7 @@ export default function SimulationPage() {
             Choisissez un <span style={{ color: '#1d9e75' }}>modèle à simuler</span>
           </h2>
 
-          {/* Filters */}
           <div style={{ display: 'flex', flexWrap: 'wrap', gap: 10, marginBottom: 24, alignItems: 'center' }}>
-            {/* Search */}
             <div style={{ position: 'relative', flex: '1 1 220px', minWidth: 0 }}>
               <span style={{ position: 'absolute', left: 10, top: '50%', transform: 'translateY(-50%)', fontSize: 12, color: '#444441', pointerEvents: 'none' }}>🔍</span>
               <input
@@ -846,7 +1006,6 @@ export default function SimulationPage() {
                 onBlur={(e) => { e.currentTarget.style.borderColor = '#2c2c2a' }}
               />
             </div>
-            {/* Brand filter */}
             <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
               <button
                 onClick={() => setBrandFilter('ALL')}
@@ -917,7 +1076,6 @@ export default function SimulationPage() {
 
   return (
     <div style={S.page}>
-      {/* Header */}
       <div style={S.hdr}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 14 }}>
           <button onClick={() => setStep('pick-model')} style={{ background: 'none', border: 'none', color: '#5f5e5a', cursor: 'pointer', fontSize: 12, padding: 0 }}>← Retour</button>
@@ -934,14 +1092,12 @@ export default function SimulationPage() {
         </div>
       </div>
 
-      {/* 3-column layout */}
       <div style={{
         display: 'grid',
         gridTemplateColumns: '270px 1fr 270px',
         minHeight: 'calc(100vh - 46px)',
       }}>
 
-        {/* ── LEFT: Besoins ──────────────────────────────────────────────────── */}
         <div style={{ borderRight: '0.5px solid #1a1a18', padding: '20px 16px', overflowY: 'auto', background: '#0c0c0b' }}>
           <p style={{ fontSize: 10, color: '#5f5e5a', letterSpacing: '0.15em', marginBottom: 6 }}>MES BESOINS</p>
           <p style={{ fontSize: 9, color: '#333', marginBottom: 18, lineHeight: 1.6 }}>
@@ -950,14 +1106,12 @@ export default function SimulationPage() {
           <NeedsPanel
             domainCode={domainCode}
             needs={needs}
-            onChange={(id, val) => setNeeds((prev) => ({ ...prev, [id]: val }))}
+            onChange={handleNeedChange}
           />
         </div>
 
-        {/* ── CENTER: Visualisation + métriques ──────────────────────────────── */}
         <div style={{ padding: '20px 20px', overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: 16 }}>
 
-          {/* Viewer */}
           <div style={{
             ...S.card,
             border: `0.5px solid ${statusColor.border}`,
@@ -978,15 +1132,38 @@ export default function SimulationPage() {
             />
           </div>
 
-          {/* 6 metric cards */}
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3,1fr)', gap: 8 }}>
             {[
-              { label: 'CPU', value: metrics.cpu, color: '#534ab7' },
-              { label: 'RAM', value: metrics.ram, color: '#1d6e9e' },
-              { label: 'Température', value: metrics.temp, color: metrics.temp > 75 ? '#e24b4a' : '#ef9f27' },
-              { label: 'Bande passante', value: metrics.bandwidth, color: '#1d9e75' },
-              { label: 'Disque I/O', value: metrics.diskIO, color: '#993c1d' },
-              { label: 'Consommation', value: metrics.power, color: '#ba7517' },
+              { 
+                label: 'CPU', 
+                value: metrics.cpu, 
+                color: metrics.cpu > 75 ? '#e24b4a' : metrics.cpu > 50 ? '#ef9f27' : '#534ab7' 
+              },
+              { 
+                label: 'RAM', 
+                value: metrics.ram, 
+                color: metrics.ram > 75 ? '#e24b4a' : metrics.ram > 50 ? '#ef9f27' : '#1d6e9e' 
+              },
+              { 
+                label: 'Température', 
+                value: metrics.temp, 
+                color: metrics.temp > 75 ? '#e24b4a' : metrics.temp > 50 ? '#ef9f27' : '#1d9e75' 
+              },
+              { 
+                label: 'Bande passante', 
+                value: metrics.bandwidth, 
+                color: metrics.bandwidth > 75 ? '#e24b4a' : metrics.bandwidth > 50 ? '#ef9f27' : '#1d9e75' 
+              },
+              { 
+                label: 'Disque I/O', 
+                value: metrics.diskIO, 
+                color: metrics.diskIO > 75 ? '#e24b4a' : metrics.diskIO > 50 ? '#ef9f27' : '#993c1d' 
+              },
+              { 
+                label: 'Consommation', 
+                value: metrics.power, 
+                color: metrics.power > 75 ? '#e24b4a' : metrics.power > 50 ? '#ef9f27' : '#ba7517' 
+              },
             ].map((mc) => (
               <div key={mc.label} style={{ ...S.card, padding: '10px 12px' }}>
                 <div style={{ fontSize: 8, color: '#5f5e5a', letterSpacing: '0.08em', marginBottom: 4 }}>{mc.label.toUpperCase()}</div>
@@ -1000,14 +1177,12 @@ export default function SimulationPage() {
             ))}
           </div>
 
-          {/* Alert */}
           {status !== 'healthy' && (
             <div style={{ background: status === 'critical' ? 'rgba(153,60,29,0.1)' : 'rgba(133,79,11,0.1)', border: `0.5px solid ${statusColor.border}`, borderRadius: 10, padding: '10px 14px', fontSize: 11, color: status === 'critical' ? '#f09595' : '#fac775' }}>
               {status === 'critical' ? '⚠ Charge critique — la configuration actuelle dépasse les capacités recommandées.' : '⚠ Charge élevée — certains besoins sollicitent fortement les ressources.'}
             </div>
           )}
 
-          {/* Résumé configuration choisie */}
           <div style={S.card}>
             <p style={{ fontSize: 10, color: '#5f5e5a', letterSpacing: '0.1em', marginBottom: 10 }}>RÉCAPITULATIF</p>
             <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 11, marginBottom: 6 }}>
@@ -1035,7 +1210,6 @@ export default function SimulationPage() {
             </div>
           </div>
 
-          {/* CTA */}
           <button
             onClick={() => router.push(`/configurator/${selectedProduct.id}`)}
             style={{ background: '#1d9e75', border: 'none', borderRadius: 10, padding: '14px 20px', color: '#0a0a09', fontSize: 13, fontWeight: 500, cursor: 'pointer', fontFamily: 'inherit', display: 'flex', alignItems: 'center', justifyContent: 'space-between', transition: 'background 0.2s' }}
@@ -1047,7 +1221,6 @@ export default function SimulationPage() {
           </button>
         </div>
 
-        {/* ── RIGHT: Options produit ──────────────────────────────────────────── */}
         <div style={{ borderLeft: '0.5px solid #1a1a18', padding: '20px 16px', overflowY: 'auto', background: '#0c0c0b' }}>
           <p style={{ fontSize: 10, color: '#5f5e5a', letterSpacing: '0.15em', marginBottom: 6 }}>OPTIONS PRODUIT</p>
           <p style={{ fontSize: 9, color: '#333', marginBottom: 16, lineHeight: 1.6 }}>
@@ -1060,7 +1233,6 @@ export default function SimulationPage() {
             onToggle={(optId, valueIdx) => setOptionsState((prev) => ({ ...prev, [optId]: valueIdx }))}
           />
 
-          {/* Mini gauge summary */}
           <div style={{ borderTop: '0.5px solid #1a1a18', marginTop: 20, paddingTop: 16 }}>
             <p style={{ fontSize: 10, color: '#5f5e5a', letterSpacing: '0.15em', marginBottom: 12 }}>APERÇU MÉTRIQUES</p>
             <GaugeBar label="CPU" value={metrics.cpu} color="#534ab7" />

@@ -1,3 +1,4 @@
+// /app/api/auth/login/route.ts
 import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/prisma'
 import bcrypt from 'bcryptjs'
@@ -10,6 +11,15 @@ const refreshSecret = new TextEncoder().encode(process.env.JWT_REFRESH_SECRET!)
 const loginAttempts = new Map<string, { count: number; firstAttempt: number }>()
 const MAX_ATTEMPTS = 5
 const WINDOW_MS = 15 * 60 * 1000 // 15 minutes
+
+function getClientIp(req: NextRequest): string {
+  // On prend uniquement la première IP de la chaîne pour éviter le spoofing trivial
+  const forwarded = req.headers.get('x-forwarded-for')
+  if (forwarded) {
+    return forwarded.split(',')[0].trim()
+  }
+  return 'unknown'
+}
 
 function isRateLimited(ip: string): boolean {
   const now = Date.now()
@@ -38,7 +48,7 @@ function resetAttempts(ip: string) {
 
 export async function POST(req: NextRequest) {
   try {
-    const ip = req.headers.get('x-forwarded-for') || 'unknown'
+    const ip = getClientIp(req)
 
     if (isRateLimited(ip)) {
       return NextResponse.json(
@@ -48,36 +58,31 @@ export async function POST(req: NextRequest) {
     }
 
     const body = await req.json()
-    console.log('BODY RECU:', body)
-
     const { email, password } = body
 
+    // ── Aucun log du body, du password, ni des données utilisateur ──────────
+
     const user = await prisma.user.findUnique({ where: { email } })
-    console.log('USER:', user?.email, '| ACTIVE:', user?.isActive, '| ROLE:', user?.userRole)
 
     if (!user) {
-      console.log('USER NOT FOUND')
       return NextResponse.json({ error: 'Identifiants invalides' }, { status: 401 })
     }
 
     if (!user.isActive) {
-      console.log('USER INACTIVE')
       return NextResponse.json({ error: 'Compte désactivé' }, { status: 403 })
     }
 
     const isValid = await bcrypt.compare(password, user.password)
-    console.log('PASSWORD VALID:', isValid)
 
-    // Log de connexion
+    // Log de connexion (sans données sensibles)
     const device = req.headers.get('user-agent') || 'unknown'
-
     await prisma.loginLog.create({
       data: {
         userId: user.id,
         ipAddress: ip,
         deviceInfo: device,
         statusLog: isValid ? 'SUCCESS' : 'FAILED',
-      }
+      },
     })
 
     if (!isValid) {
@@ -108,13 +113,13 @@ export async function POST(req: NextRequest) {
         token: refreshToken,
         userId: user.id,
         expiresAt: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000),
-      }
+      },
     })
 
     // Mettre à jour lastLogin
     await prisma.user.update({
       where: { id: user.id },
-      data: { lastLogin: new Date() }
+      data: { lastLogin: new Date() },
     })
 
     const response = NextResponse.json({
@@ -124,7 +129,7 @@ export async function POST(req: NextRequest) {
         role: user.userRole,
         firstName: user.firstName,
         lastName: user.lastName,
-      }
+      },
     })
 
     // Cookies HTTPOnly
@@ -143,7 +148,6 @@ export async function POST(req: NextRequest) {
     })
 
     return response
-
   } catch (error) {
     console.error('LOGIN ERROR:', error)
     return NextResponse.json({ error: 'Erreur serveur' }, { status: 500 })

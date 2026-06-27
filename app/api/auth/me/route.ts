@@ -1,3 +1,4 @@
+// /app/api/auth/me/route.ts
 import { NextRequest, NextResponse } from 'next/server'
 import { jwtVerify } from 'jose'
 import { prisma } from '@/lib/prisma'
@@ -17,10 +18,18 @@ export async function GET(req: NextRequest) {
         email: true, userRole: true, isActive: true,
         phone: true, adresse: true, departement: true,
         companyName: true, createdAt: true, lastLogin: true,
-        photo: true,  
-      }
+        photo: true,
+      },
     })
+
     if (!user) return NextResponse.json({ error: 'Utilisateur introuvable' }, { status: 404 })
+
+    // ── Vérification isActive ────────────────────────────────────────────────
+    if (!user.isActive) {
+      return NextResponse.json({ error: 'Compte désactivé' }, { status: 403 })
+    }
+    // ─────────────────────────────────────────────────────────────────────────
+
     return NextResponse.json({ user })
   } catch {
     return NextResponse.json({ error: 'Token invalide' }, { status: 401 })

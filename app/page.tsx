@@ -1245,6 +1245,37 @@ export default function Home() {
       .map((entry) => entry.model)
   }, [filteredModels, sortBy])
 
+
+const filteredGlobalModels = useMemo(() => {
+  const q = query.trim().toLowerCase()
+  if (!q) return []
+ 
+  return catalog.models
+    .filter((model) => model.condition === 'STANDARD')
+    .filter((model) => {
+      const brandName = catalog.brands.find((b) => b.id === model.brandId)?.name ?? ''
+      const seriesName = catalog.series.find((s) => s.id === model.seriesId)?.name ?? ''
+      const haystack = [
+        model.name,
+        model.reference,
+        brandName,
+        seriesName,
+        model.shortDescription ?? '',
+        model.longDescription ?? '',
+      ]
+        .join(' ')
+        .toLowerCase()
+      return haystack.includes(q)
+    })
+    .sort((a, b) => a.name.localeCompare(b.name))
+    .slice(0, 24)
+}, [catalog.brands, catalog.models, catalog.series, query])
+ 
+
+
+
+
+
   const pageSize = 12
   const totalPages = Math.max(1, Math.ceil(sortedModels.length / pageSize))
   const safePage = Math.min(currentPage, totalPages)
@@ -1409,8 +1440,95 @@ export default function Home() {
         </section>
       )}
 
-      <main id="products" className="mx-auto max-w-7xl px-4 py-10 sm:px-6 lg:px-8">
-        {!selectedDomain ? (
+     <main id="products" className="mx-auto max-w-7xl px-4 py-10 sm:px-6 lg:px-8">
+
+        {/* ── Recherche globale : aucun domaine sélectionné + query non vide ── */}
+        {!selectedDomain && query.trim() && !loading ? (
+          <div className="space-y-5">
+            <div className="flex items-center justify-between">
+              <p className="text-sm text-[#5a7a9a]">
+                <span className="font-semibold text-[#1a3a52]">{filteredGlobalModels.length}</span>{' '}
+                résultat(s) pour &quot;{query}&quot;
+              </p>
+              <button
+                onClick={() => setQuery('')}
+                className="text-sm text-[#7a8fa3] underline hover:text-[#1a3a52]"
+              >
+                Effacer
+              </button>
+            </div>
+
+            {filteredGlobalModels.length === 0 ? (
+              <div className="flex flex-col items-center justify-center rounded-2xl border border-[#d0d9e3] bg-white p-16 text-center text-[#5a7a9a]">
+                <Package className="h-12 w-12 text-[#d0d9e3]" />
+                <p className="mt-4 font-semibold text-[#1a3a52]">Aucun résultat trouvé</p>
+                <p className="mt-1 text-sm">Essayez un autre terme de recherche</p>
+              </div>
+            ) : (
+              <div className="grid gap-5 sm:grid-cols-2 xl:grid-cols-3">
+                {filteredGlobalModels.map((model) => {
+                  const brand = catalog.brands.find((b) => b.id === model.brandId)
+                  const inStock = (model.stockQty ?? 0) > 0
+                  const isConfigurable = model.condition === 'CONFIGURABLE'
+                  const href = isConfigurable ? `/configurator/${model.id}` : `/product/${model.id}`
+
+                  return (
+                    <Link key={model.id} href={href}>
+                      <article className="group flex flex-col overflow-hidden rounded-xl border border-[#d0d9e3] bg-white shadow-sm transition-all duration-200 hover:-translate-y-1 hover:border-[#a5b8cc] hover:shadow-lg">
+                        <div className="relative aspect-[4/3] overflow-hidden bg-[#f5f7fa]">
+                          {model.image ? (
+                            <Image
+                              src={model.image}
+                              alt={model.name}
+                              width={640}
+                              height={480}
+                              className="h-full w-full object-cover transition-transform duration-300 group-hover:scale-105"
+                            />
+                          ) : (
+                            <div className="flex h-full items-center justify-center">
+                              <Package className="h-10 w-10 text-[#d0d9e3]" />
+                            </div>
+                          )}
+                        </div>
+                        <div className="flex flex-1 flex-col gap-3 p-4">
+                          <div>
+                            <h3 className="line-clamp-2 font-bold leading-snug text-[#1a3a52] group-hover:text-[#0f2d45]">
+                              {model.name}
+                            </h3>
+                            {brand && (
+                              <p className="mt-1 text-sm font-semibold text-[#1a3a52]">{brand.name}</p>
+                            )}
+                          </div>
+                          <div className="mt-auto flex items-center justify-between border-t border-[#f0f3f6] pt-3">
+                            <span
+                              className={
+                                inStock
+                                  ? 'text-xs font-semibold text-emerald-700'
+                                  : 'text-xs font-semibold text-amber-700'
+                              }
+                            >
+                              {inStock ? 'En stock' : 'Rupture'}
+                            </span>
+                            <span className="rounded-full bg-[#f0f7ff] px-2 py-0.5 text-xs font-semibold text-[#1a3a52]">
+                              {isConfigurable ? 'Configurable' : 'Standard'}
+                            </span>
+                          </div>
+                          <p className="text-lg font-black text-[#1a3a52]">
+                            {model.basePrice.toLocaleString('fr-FR', {
+                              style: 'currency',
+                              currency: 'EUR',
+                            })}
+                          </p>
+                        </div>
+                      </article>
+                    </Link>
+                  )
+                })}
+              </div>
+            )}
+          </div>
+
+        ) : !selectedDomain ? (
           loading ? (
             <div className="flex flex-col items-center justify-center rounded-2xl border border-[#d0d9e3] bg-white p-16 text-[#5a7a9a]">
               <div className="h-10 w-10 animate-spin rounded-full border-4 border-[#d0d9e3] border-t-[#2ad1a4]" />
@@ -1437,9 +1555,7 @@ export default function Home() {
                         Marque
                       </span>
                     </div>
-
                     <div className="hidden h-1 flex-1 rounded-full bg-gradient-to-r from-teal-200 to-slate-300 sm:block" />
-
                     <div className="flex flex-col items-center gap-2">
                       <div className="flex h-12 w-12 items-center justify-center rounded-full bg-slate-300 font-bold text-slate-600">
                         2
@@ -1448,9 +1564,7 @@ export default function Home() {
                         Modèle
                       </span>
                     </div>
-
                     <div className="hidden h-1 flex-1 rounded-full bg-gradient-to-r from-slate-300 to-slate-200 sm:block" />
-
                     <div className="flex flex-col items-center gap-2">
                       <div className="flex h-12 w-12 items-center justify-center rounded-full bg-slate-300 font-bold text-slate-600">
                         3
@@ -1466,7 +1580,6 @@ export default function Home() {
                   {partsBrandOptions.map((item) => {
                     const colors = getBrandColors(item.name)
                     const IconComponent = getBrandIcon(item.name)
-
                     return (
                       <button
                         key={item.brandId}
@@ -1478,12 +1591,10 @@ export default function Home() {
                         className="group relative overflow-hidden rounded-2xl border-2 border-slate-200 bg-white shadow-sm transition-all duration-300 hover:-translate-y-1 hover:border-slate-300 hover:shadow-xl"
                       >
                         <div className={`absolute inset-0 bg-gradient-to-br ${colors.primary} opacity-0 transition-opacity duration-300 group-hover:opacity-5`} />
-
                         <div className="relative flex h-full flex-col space-y-4 p-6">
                           <div className={`${colors.light} flex items-center justify-center rounded-xl p-6 transition-transform duration-300 group-hover:scale-110`}>
                             <IconComponent className={`h-16 w-16 ${colors.dark}`} />
                           </div>
-
                           <div className="flex-1 space-y-1">
                             <h3 className="text-lg font-bold text-slate-900 transition-colors group-hover:text-slate-950">
                               {item.name}
@@ -1492,10 +1603,7 @@ export default function Home() {
                               {item.count} modèle{item.count > 1 ? 's' : ''}
                             </p>
                           </div>
-
-                          <span
-                            className="flex items-center justify-center gap-2 rounded-xl bg-[#2ad1a4] px-4 py-3 font-semibold text-white transition-all duration-300 hover:bg-[#20b890] hover:shadow-lg"
-                          >
+                          <span className="flex items-center justify-center gap-2 rounded-xl bg-[#2ad1a4] px-4 py-3 font-semibold text-white transition-all duration-300 hover:bg-[#20b890] hover:shadow-lg">
                             Sélectionner
                             <ChevronRight className="h-4 w-4 transition-transform group-hover:translate-x-1" />
                           </span>
@@ -1519,44 +1627,25 @@ export default function Home() {
                 <div className="mx-auto max-w-4xl">
                   <div className="flex items-center justify-between gap-2 sm:gap-4">
                     <div className="flex flex-col items-center gap-2">
-                      <div className="flex h-12 w-12 items-center justify-center rounded-full bg-teal-500 font-bold text-white">
-                        ✓
-                      </div>
-                      <span className="hidden text-center text-xs font-semibold text-teal-600 sm:inline-block sm:text-sm">
-                        Marque
-                      </span>
+                      <div className="flex h-12 w-12 items-center justify-center rounded-full bg-teal-500 font-bold text-white">✓</div>
+                      <span className="hidden text-center text-xs font-semibold text-teal-600 sm:inline-block sm:text-sm">Marque</span>
                     </div>
-
                     <div className="hidden h-1 flex-1 rounded-full bg-gradient-to-r from-teal-200 to-teal-300 sm:block" />
-
                     <div className="flex flex-col items-center gap-2">
-                      <div className={`flex h-12 w-12 items-center justify-center rounded-full bg-gradient-to-br ${getBrandColors(selectedPartsBrand?.name || '').primary} font-bold text-white shadow-lg`}>
-                        2
-                      </div>
-                      <span className="hidden text-center text-xs font-semibold text-teal-600 sm:inline-block sm:text-sm">
-                        Modèle
-                      </span>
+                      <div className={`flex h-12 w-12 items-center justify-center rounded-full bg-gradient-to-br ${getBrandColors(selectedPartsBrand?.name || '').primary} font-bold text-white shadow-lg`}>2</div>
+                      <span className="hidden text-center text-xs font-semibold text-teal-600 sm:inline-block sm:text-sm">Modèle</span>
                     </div>
-
                     <div className="hidden h-1 flex-1 rounded-full bg-gradient-to-r from-slate-300 to-slate-200 sm:block" />
-
                     <div className="flex flex-col items-center gap-2">
-                      <div className="flex h-12 w-12 items-center justify-center rounded-full bg-slate-300 font-bold text-slate-600">
-                        3
-                      </div>
-                      <span className="hidden text-center text-xs font-semibold text-slate-500 sm:inline-block sm:text-sm">
-                        Résultats
-                      </span>
+                      <div className="flex h-12 w-12 items-center justify-center rounded-full bg-slate-300 font-bold text-slate-600">3</div>
+                      <span className="hidden text-center text-xs font-semibold text-slate-500 sm:inline-block sm:text-sm">Résultats</span>
                     </div>
                   </div>
                 </div>
 
                 <div className="flex items-center gap-4">
                   <button
-                    onClick={() => {
-                      setPartsBrandId(null)
-                      setPartsModelId(null)
-                    }}
+                    onClick={() => { setPartsBrandId(null); setPartsModelId(null) }}
                     className="inline-flex items-center gap-2 rounded-xl px-4 py-2 font-semibold text-slate-600 transition-colors hover:bg-slate-100"
                   >
                     <ArrowLeft className="h-4 w-4" />
@@ -1570,34 +1659,21 @@ export default function Home() {
                 <div className="grid gap-4 sm:grid-cols-2 sm:gap-6 lg:grid-cols-4">
                   {partsModelOptions.map((model) => {
                     const brandColors = getBrandColors(selectedPartsBrand?.name || '')
-
                     return (
                       <button
                         key={model.id}
-                          onClick={() => {
-                            setPartsModelId(model.id)
-                            setPartsSelectedFilters({})
-                          }}
+                        onClick={() => { setPartsModelId(model.id); setPartsSelectedFilters({}) }}
                         className="group relative overflow-hidden rounded-2xl border-2 border-slate-200 bg-white shadow-sm transition-all duration-300 hover:-translate-y-1 hover:border-slate-300 hover:shadow-xl"
                       >
                         <div className={`absolute inset-0 bg-gradient-to-br ${brandColors.primary} opacity-0 transition-opacity duration-300 group-hover:opacity-5`} />
-
                         <div className="relative flex h-full flex-col space-y-4 p-6">
                           <div className={`${brandColors.light} flex aspect-video items-center justify-center rounded-xl p-8 transition-transform duration-300 group-hover:scale-110`}>
-                            <div className="text-4xl font-black text-slate-600 opacity-30">
-                              {model.name.charAt(0)}
-                            </div>
+                            <div className="text-4xl font-black text-slate-600 opacity-30">{model.name.charAt(0)}</div>
                           </div>
-
                           <div className="flex-1">
-                            <h3 className="line-clamp-2 text-base font-bold text-slate-900 transition-colors group-hover:text-slate-950">
-                              {model.name}
-                            </h3>
+                            <h3 className="line-clamp-2 text-base font-bold text-slate-900 transition-colors group-hover:text-slate-950">{model.name}</h3>
                           </div>
-
-                          <span
-                            className="flex items-center justify-center gap-2 rounded-xl bg-[#2ad1a4] px-4 py-3 font-semibold text-white transition-all duration-300 hover:bg-[#20b890] hover:shadow-lg"
-                          >
+                          <span className="flex items-center justify-center gap-2 rounded-xl bg-[#2ad1a4] px-4 py-3 font-semibold text-white transition-all duration-300 hover:bg-[#20b890] hover:shadow-lg">
                             Sélectionner
                             <ChevronRight className="h-4 w-4 transition-transform group-hover:translate-x-1" />
                           </span>
@@ -1621,34 +1697,18 @@ export default function Home() {
                 <div className="mx-auto max-w-4xl">
                   <div className="flex items-center justify-between gap-2 sm:gap-4">
                     <div className="flex flex-col items-center gap-2">
-                      <div className="flex h-12 w-12 items-center justify-center rounded-full bg-teal-500 font-bold text-white">
-                        ✓
-                      </div>
-                      <span className="hidden text-center text-xs font-semibold text-teal-600 sm:inline-block sm:text-sm">
-                        Marque
-                      </span>
+                      <div className="flex h-12 w-12 items-center justify-center rounded-full bg-teal-500 font-bold text-white">✓</div>
+                      <span className="hidden text-center text-xs font-semibold text-teal-600 sm:inline-block sm:text-sm">Marque</span>
                     </div>
-
                     <div className="hidden h-1 flex-1 rounded-full bg-gradient-to-r from-teal-200 to-teal-300 sm:block" />
-
                     <div className="flex flex-col items-center gap-2">
-                      <div className="flex h-12 w-12 items-center justify-center rounded-full bg-teal-500 font-bold text-white">
-                        ✓
-                      </div>
-                      <span className="hidden text-center text-xs font-semibold text-teal-600 sm:inline-block sm:text-sm">
-                        Modèle
-                      </span>
+                      <div className="flex h-12 w-12 items-center justify-center rounded-full bg-teal-500 font-bold text-white">✓</div>
+                      <span className="hidden text-center text-xs font-semibold text-teal-600 sm:inline-block sm:text-sm">Modèle</span>
                     </div>
-
                     <div className="hidden h-1 flex-1 rounded-full bg-gradient-to-r from-teal-200 to-teal-300 sm:block" />
-
                     <div className="flex flex-col items-center gap-2">
-                      <div className={`flex h-12 w-12 items-center justify-center rounded-full bg-gradient-to-br ${getBrandColors(selectedPartsBrand?.name || '').primary} font-bold text-white shadow-lg`}>
-                        3
-                      </div>
-                      <span className="hidden text-center text-xs font-semibold text-teal-600 sm:inline-block sm:text-sm">
-                        Résultats
-                      </span>
+                      <div className={`flex h-12 w-12 items-center justify-center rounded-full bg-gradient-to-br ${getBrandColors(selectedPartsBrand?.name || '').primary} font-bold text-white shadow-lg`}>3</div>
+                      <span className="hidden text-center text-xs font-semibold text-teal-600 sm:inline-block sm:text-sm">Résultats</span>
                     </div>
                   </div>
                 </div>
@@ -1660,16 +1720,12 @@ export default function Home() {
                         <h3 className="text-base font-bold text-[#1a3a52]">Filtres</h3>
                         <button
                           type="button"
-                          onClick={() => {
-                            setPartsSelectedFilters({})
-                            setPartsStockFilter('all')
-                          }}
+                          onClick={() => { setPartsSelectedFilters({}); setPartsStockFilter('all') }}
                           className="text-sm text-[#7a8fa3] transition hover:text-[#1a3a52]"
                         >
                           Réinitialiser
                         </button>
                       </div>
-
                       <div className="space-y-4">
                         <div className="rounded-xl bg-[#f8fafc] p-3">
                           <p className="mb-2 text-xs font-bold uppercase tracking-widest text-[#7a8fa3]">Stock</p>
@@ -1681,18 +1737,9 @@ export default function Home() {
                             ].map((item) => {
                               const active = partsStockFilter === item.value
                               return (
-                                <label
-                                  key={item.value}
-                                  className={`flex cursor-pointer items-center justify-between rounded-lg border px-3 py-2 text-sm transition ${active ? 'border-[#2ad1a4] bg-[#f0fdf9] text-[#1a3a52] ring-1 ring-[#2ad1a4]' : 'border-[#d0d9e3] bg-white text-[#334e68] hover:border-[#a5b8cc] hover:bg-[#f9fbfc]'}`}
-                                >
+                                <label key={item.value} className={`flex cursor-pointer items-center justify-between rounded-lg border px-3 py-2 text-sm transition ${active ? 'border-[#2ad1a4] bg-[#f0fdf9] text-[#1a3a52] ring-1 ring-[#2ad1a4]' : 'border-[#d0d9e3] bg-white text-[#334e68] hover:border-[#a5b8cc] hover:bg-[#f9fbfc]'}`}>
                                   <span className="flex items-center gap-2">
-                                    <input
-                                      type="radio"
-                                      name="parts-stock-filter"
-                                      checked={active}
-                                      onChange={() => setPartsStockFilter(item.value as 'all' | 'in' | 'out')}
-                                      className="h-4 w-4 accent-[#2ad1a4]"
-                                    />
+                                    <input type="radio" name="parts-stock-filter" checked={active} onChange={() => setPartsStockFilter(item.value as 'all' | 'in' | 'out')} className="h-4 w-4 accent-[#2ad1a4]" />
                                     {item.label}
                                   </span>
                                 </label>
@@ -1711,17 +1758,9 @@ export default function Home() {
                                 {group.options.map((option) => {
                                   const checked = (partsSelectedFilters[group.key] ?? []).includes(option.value)
                                   return (
-                                    <label
-                                      key={`${group.key}-${option.value}`}
-                                      className={`flex cursor-pointer items-center justify-between rounded-lg border px-3 py-2 text-sm transition ${checked ? 'border-[#2ad1a4] bg-[#f0fdf9] text-[#1a3a52] ring-1 ring-[#2ad1a4]' : 'border-[#d0d9e3] bg-white text-[#334e68] hover:border-[#a5b8cc] hover:bg-[#f9fbfc]'}`}
-                                    >
+                                    <label key={`${group.key}-${option.value}`} className={`flex cursor-pointer items-center justify-between rounded-lg border px-3 py-2 text-sm transition ${checked ? 'border-[#2ad1a4] bg-[#f0fdf9] text-[#1a3a52] ring-1 ring-[#2ad1a4]' : 'border-[#d0d9e3] bg-white text-[#334e68] hover:border-[#a5b8cc] hover:bg-[#f9fbfc]'}`}>
                                       <span className="flex items-center gap-2">
-                                        <input
-                                          type="checkbox"
-                                          checked={checked}
-                                          onChange={(event) => togglePartsFilter(group.key, option.value, event.target.checked)}
-                                          className="h-4 w-4 accent-[#2ad1a4]"
-                                        />
+                                        <input type="checkbox" checked={checked} onChange={(event) => togglePartsFilter(group.key, option.value, event.target.checked)} className="h-4 w-4 accent-[#2ad1a4]" />
                                         {option.value}
                                       </span>
                                       <span className="text-xs text-[#7a8fa3]">({option.count})</span>
@@ -1739,26 +1778,16 @@ export default function Home() {
                   <div className="space-y-4">
                     <div className="space-y-4 rounded-2xl border-2 border-slate-200 bg-white p-6 sm:flex sm:items-center sm:justify-between sm:space-y-0">
                       <div>
-                        <h2 className="text-2xl font-bold text-slate-900 sm:text-3xl">
-                          Pièces compatibles
-                        </h2>
-                        <p className="mt-2 text-sm text-slate-500">
-                          {selectedPartsBrand?.name} • {selectedPartsModel?.name}
-                        </p>
+                        <h2 className="text-2xl font-bold text-slate-900 sm:text-3xl">Pièces compatibles</h2>
+                        <p className="mt-2 text-sm text-slate-500">{selectedPartsBrand?.name} • {selectedPartsModel?.name}</p>
                       </div>
-
-                      <div className="flex flex-col items-stretch gap-3 sm:flex-row sm:items-center">
-                        <button
-                          onClick={() => {
-                            setPartsModelId(null)
-                            setPartsSelectedFilters({})
-                          }}
-                          className="order-2 inline-flex items-center justify-center gap-2 rounded-xl px-4 py-2 font-semibold text-slate-600 transition-colors hover:bg-slate-100 sm:order-1 sm:justify-start"
-                        >
-                          <ArrowLeft className="h-4 w-4" />
-                          <span className="hidden sm:inline">Changer</span>
-                        </button>
-                      </div>
+                      <button
+                        onClick={() => { setPartsModelId(null); setPartsSelectedFilters({}) }}
+                        className="inline-flex items-center gap-2 rounded-xl px-4 py-2 font-semibold text-slate-600 transition-colors hover:bg-slate-100"
+                      >
+                        <ArrowLeft className="h-4 w-4" />
+                        <span className="hidden sm:inline">Changer</span>
+                      </button>
                     </div>
 
                     {compatiblePartModels.length === 0 ? (
@@ -1771,59 +1800,40 @@ export default function Home() {
                         {compatiblePartModels.map((model) => {
                           const inStock = (model.stockQty ?? 0) > 0
                           const brandColors = getBrandColors(selectedPartsBrand?.name || '')
-
                           return (
-                            <article
-                              key={model.id}
-                              className="group relative overflow-hidden rounded-2xl border-2 border-slate-200 bg-white shadow-sm transition-all duration-300 hover:-translate-y-1 hover:border-slate-300 hover:shadow-xl"
-                            >
-                              <div className={`absolute inset-0 bg-gradient-to-br ${brandColors.primary} opacity-0 transition-opacity duration-300 group-hover:opacity-5`} />
-
-                              <div className="relative flex h-full flex-col space-y-3 p-5">
-                                <div className={`${brandColors.light} flex aspect-video items-center justify-center rounded-xl p-4 transition-transform duration-300 group-hover:scale-105`}>
-                                  <div className="text-3xl font-black text-slate-600 opacity-30">
-                                    {model.name.charAt(0)}
+                            <Link key={model.id} href={`/product/${model.id}`}>
+                              <article className="group relative overflow-hidden rounded-2xl border-2 border-slate-200 bg-white shadow-sm transition-all duration-300 hover:-translate-y-1 hover:border-slate-300 hover:shadow-xl">
+                                <div className={`absolute inset-0 bg-gradient-to-br ${brandColors.primary} opacity-0 transition-opacity duration-300 group-hover:opacity-5`} />
+                                <div className="relative flex h-full flex-col space-y-3 p-5">
+                                  <div className={`${brandColors.light} flex aspect-video items-center justify-center rounded-xl p-4 transition-transform duration-300 group-hover:scale-105`}>
+                                    <div className="text-3xl font-black text-slate-600 opacity-30">{model.name.charAt(0)}</div>
+                                  </div>
+                                  <div className="flex-1 space-y-2">
+                                    <h4 className="line-clamp-2 text-sm font-bold text-slate-900 transition-colors group-hover:text-slate-950">{model.name}</h4>
+                                    <p className="text-xs text-slate-500">{model.brandName} • {model.familyName}</p>
+                                  </div>
+                                  <div className="flex items-center justify-between border-t border-slate-200 pt-3">
+                                    <span className={`text-xs font-bold uppercase tracking-wide ${inStock ? 'text-emerald-600' : 'text-amber-600'}`}>
+                                      {inStock ? '✓ Stock' : '✕ Rupture'}
+                                    </span>
+                                  </div>
+                                  <div className="flex items-center justify-between pt-1">
+                                    <p className={`bg-gradient-to-br ${brandColors.primary} bg-clip-text text-lg font-black text-transparent`}>
+                                      {model.basePrice.toLocaleString('fr-FR', { style: 'currency', currency: 'EUR' })}
+                                    </p>
+                                    <button
+                                      type="button"
+                                      disabled={!inStock}
+                                      onClick={(e) => { e.preventDefault(); addSparePartToCart(model) }}
+                                      className={`inline-flex items-center justify-center rounded-full p-2 text-white transition ${inStock ? 'bg-[#2ad1a4] hover:bg-[#20b890]' : 'cursor-not-allowed bg-slate-300 text-slate-500'}`}
+                                      title={inStock ? 'Ajouter au panier' : 'Rupture de stock'}
+                                    >
+                                      <ShoppingCart className="h-5 w-5" />
+                                    </button>
                                   </div>
                                 </div>
-
-                                <div className="flex-1 space-y-2">
-                                  <h4 className="line-clamp-2 text-sm font-bold text-slate-900 transition-colors group-hover:text-slate-950">
-                                    {model.name}
-                                  </h4>
-                                  <p className="text-xs text-slate-500">
-                                    {model.brandName} • {model.familyName}
-                                  </p>
-                                </div>
-
-                                <div className="flex items-center justify-between border-t border-slate-200 pt-3">
-                                  <span
-                                    className={`text-xs font-bold uppercase tracking-wide ${
-                                      inStock ? 'text-emerald-600' : 'text-amber-600'
-                                    }`}
-                                  >
-                                    {inStock ? '✓ Stock' : '✕ Rupture'}
-                                  </span>
-                                </div>
-
-                                <div className="flex items-center justify-between pt-1">
-                                  <p className={`bg-gradient-to-br ${brandColors.primary} bg-clip-text text-lg font-black text-transparent`}>
-                                    {model.basePrice.toLocaleString('fr-FR', {
-                                      style: 'currency',
-                                      currency: 'EUR',
-                                    })}
-                                  </p>
-                                  <button
-                                    type="button"
-                                    disabled={!inStock}
-                                    onClick={() => addSparePartToCart(model)}
-                                    className={`inline-flex items-center justify-center rounded-full p-2 text-white transition ${inStock ? 'bg-[#2ad1a4] hover:bg-[#20b890]' : 'cursor-not-allowed bg-slate-300 text-slate-500'}`}
-                                    title={inStock ? 'Ajouter au panier' : 'Rupture de stock'}
-                                  >
-                                    <ShoppingCart className="h-5 w-5" />
-                                  </button>
-                                </div>
-                              </div>
-                            </article>
+                              </article>
+                            </Link>
                           )
                         })}
                       </div>
@@ -1848,18 +1858,8 @@ export default function Home() {
                   <button
                     type="button"
                     onClick={() => {
-                      if (isConfiguratorDomain) {
-                        setSelectedBrand(null)
-                        setSelectedModel(null)
-                        setStockFilter('all')
-                        setPoeFilter('all')
-                      }
-                      if (isProductsDomain) {
-                        setSelectedBrand(null)
-                        setSelectedSeries(null)
-                        setSelectedModel(null)
-                        setSelectedSpecFilters({})
-                      }
+                      if (isConfiguratorDomain) { setSelectedBrand(null); setSelectedModel(null); setStockFilter('all'); setPoeFilter('all') }
+                      if (isProductsDomain) { setSelectedBrand(null); setSelectedSeries(null); setSelectedModel(null); setSelectedSpecFilters({}) }
                     }}
                     className="text-sm text-[#7a8fa3] transition hover:text-[#1a3a52]"
                   >
@@ -1873,44 +1873,19 @@ export default function Home() {
                       <div className="rounded-xl bg-[#f8fafc] p-3">
                         <p className="mb-2 text-xs font-bold uppercase tracking-widest text-[#7a8fa3]">Marque</p>
                         <div className="space-y-2">
-                          <label
-                            className={`flex cursor-pointer items-center justify-between rounded-lg border px-3 py-2 text-sm transition ${selectedBrand === null ? 'border-[#2ad1a4] bg-[#f0fdf9] text-[#1a3a52] ring-1 ring-[#2ad1a4]' : 'border-[#d0d9e3] bg-white text-[#334e68] hover:border-[#a5b8cc] hover:bg-[#f9fbfc]'}`}
-                          >
+                          <label className={`flex cursor-pointer items-center justify-between rounded-lg border px-3 py-2 text-sm transition ${selectedBrand === null ? 'border-[#2ad1a4] bg-[#f0fdf9] text-[#1a3a52] ring-1 ring-[#2ad1a4]' : 'border-[#d0d9e3] bg-white text-[#334e68] hover:border-[#a5b8cc] hover:bg-[#f9fbfc]'}`}>
                             <span className="flex items-center gap-2">
-                              <input
-                                type="radio"
-                                name="brand-filter"
-                                checked={selectedBrand === null}
-                                onChange={() => {
-                                  setSelectedBrand(null)
-                                  setSelectedModel(null)
-                                }}
-                                className="h-4 w-4 accent-[#2ad1a4]"
-                              />
+                              <input type="radio" name="brand-filter" checked={selectedBrand === null} onChange={() => { setSelectedBrand(null); setSelectedModel(null) }} className="h-4 w-4 accent-[#2ad1a4]" />
                               Toutes
                             </span>
                             <span className="text-xs text-[#7a8fa3]">({configuratorBrandTotal})</span>
                           </label>
-
                           {configuratorBrandOptions.map((item) => {
                             const active = selectedBrand === item.brandId
-
                             return (
-                              <label
-                                key={item.brandId}
-                                className={`flex cursor-pointer items-center justify-between rounded-lg border px-3 py-2 text-sm transition ${active ? 'border-[#2ad1a4] bg-[#f0fdf9] text-[#1a3a52] ring-1 ring-[#2ad1a4]' : 'border-[#d0d9e3] bg-white text-[#334e68] hover:border-[#a5b8cc] hover:bg-[#f9fbfc]'}`}
-                              >
+                              <label key={item.brandId} className={`flex cursor-pointer items-center justify-between rounded-lg border px-3 py-2 text-sm transition ${active ? 'border-[#2ad1a4] bg-[#f0fdf9] text-[#1a3a52] ring-1 ring-[#2ad1a4]' : 'border-[#d0d9e3] bg-white text-[#334e68] hover:border-[#a5b8cc] hover:bg-[#f9fbfc]'}`}>
                                 <span className="flex items-center gap-2">
-                                  <input
-                                    type="radio"
-                                    name="brand-filter"
-                                    checked={active}
-                                    onChange={() => {
-                                      setSelectedBrand(item.brandId)
-                                      setSelectedModel(null)
-                                    }}
-                                    className="h-4 w-4 accent-[#2ad1a4]"
-                                  />
+                                  <input type="radio" name="brand-filter" checked={active} onChange={() => { setSelectedBrand(item.brandId); setSelectedModel(null) }} className="h-4 w-4 accent-[#2ad1a4]" />
                                   {item.name}
                                 </span>
                                 <span className="text-xs text-[#7a8fa3]">({item.count})</span>
@@ -1921,64 +1896,38 @@ export default function Home() {
                       </div>
 
                       <div className="rounded-xl bg-[#f8fafc] p-3">
-                    <p className="mb-2 text-xs font-bold uppercase tracking-widest text-[#7a8fa3]">Stock</p>
-                    <div className="space-y-2">
-                      {[
-                        { value: 'all', label: 'Tous' },
-                        { value: 'in', label: 'En stock' },
-                        { value: 'out', label: 'Rupture' },
-                      ].map((item) => {
-                        const active = stockFilter === item.value
-                        return (
-                          <label
-                            key={item.value}
-                            className={`flex cursor-pointer items-center justify-between rounded-lg border px-3 py-2 text-sm transition ${active ? 'border-[#2ad1a4] bg-[#f0fdf9] text-[#1a3a52] ring-1 ring-[#2ad1a4]' : 'border-[#d0d9e3] bg-white text-[#334e68] hover:border-[#a5b8cc] hover:bg-[#f9fbfc]'}`}
-                          >
-                            <span className="flex items-center gap-2">
-                              <input
-                                type="radio"
-                                name="stock-filter"
-                                checked={active}
-                                onChange={() => setStockFilter(item.value as 'all' | 'in' | 'out')}
-                                className="h-4 w-4 accent-[#2ad1a4]"
-                              />
-                              {item.label}
-                            </span>
-                            {item.value !== 'all' && <span className="text-xs text-[#7a8fa3]">({item.value === 'in' ? 'stock' : 'rupture'})</span>}
-                          </label>
-                        )
-                      })}
-                    </div>
+                        <p className="mb-2 text-xs font-bold uppercase tracking-widest text-[#7a8fa3]">Stock</p>
+                        <div className="space-y-2">
+                          {[{ value: 'all', label: 'Tous' }, { value: 'in', label: 'En stock' }, { value: 'out', label: 'Rupture' }].map((item) => {
+                            const active = stockFilter === item.value
+                            return (
+                              <label key={item.value} className={`flex cursor-pointer items-center justify-between rounded-lg border px-3 py-2 text-sm transition ${active ? 'border-[#2ad1a4] bg-[#f0fdf9] text-[#1a3a52] ring-1 ring-[#2ad1a4]' : 'border-[#d0d9e3] bg-white text-[#334e68] hover:border-[#a5b8cc] hover:bg-[#f9fbfc]'}`}>
+                                <span className="flex items-center gap-2">
+                                  <input type="radio" name="stock-filter" checked={active} onChange={() => setStockFilter(item.value as 'all' | 'in' | 'out')} className="h-4 w-4 accent-[#2ad1a4]" />
+                                  {item.label}
+                                </span>
+                                {item.value !== 'all' && <span className="text-xs text-[#7a8fa3]">({item.value === 'in' ? 'stock' : 'rupture'})</span>}
+                              </label>
+                            )
+                          })}
+                        </div>
                       </div>
 
                       <div className="rounded-xl bg-[#f8fafc] p-3">
-                    <p className="mb-2 text-xs font-bold uppercase tracking-widest text-[#7a8fa3]">PoE</p>
-                    <div className="space-y-2">
-                      {[
-                        { value: 'all', label: 'Tous' },
-                        { value: 'yes', label: 'Oui' },
-                        { value: 'no', label: 'Non' },
-                      ].map((item) => {
-                        const active = poeFilter === item.value
-                        return (
-                          <label
-                            key={item.value}
-                            className={`flex cursor-pointer items-center justify-between rounded-lg border px-3 py-2 text-sm transition ${active ? 'border-[#2ad1a4] bg-[#f0fdf9] text-[#1a3a52] ring-1 ring-[#2ad1a4]' : 'border-[#d0d9e3] bg-white text-[#334e68] hover:border-[#a5b8cc] hover:bg-[#f9fbfc]'}`}
-                          >
-                            <span className="flex items-center gap-2">
-                              <input
-                                type="radio"
-                                name="poe-filter"
-                                checked={active}
-                                onChange={() => setPoeFilter(item.value as 'all' | 'yes' | 'no')}
-                                className="h-4 w-4 accent-[#2ad1a4]"
-                              />
-                              {item.label}
-                            </span>
-                          </label>
-                        )
-                      })}
-                    </div>
+                        <p className="mb-2 text-xs font-bold uppercase tracking-widest text-[#7a8fa3]">PoE</p>
+                        <div className="space-y-2">
+                          {[{ value: 'all', label: 'Tous' }, { value: 'yes', label: 'Oui' }, { value: 'no', label: 'Non' }].map((item) => {
+                            const active = poeFilter === item.value
+                            return (
+                              <label key={item.value} className={`flex cursor-pointer items-center justify-between rounded-lg border px-3 py-2 text-sm transition ${active ? 'border-[#2ad1a4] bg-[#f0fdf9] text-[#1a3a52] ring-1 ring-[#2ad1a4]' : 'border-[#d0d9e3] bg-white text-[#334e68] hover:border-[#a5b8cc] hover:bg-[#f9fbfc]'}`}>
+                                <span className="flex items-center gap-2">
+                                  <input type="radio" name="poe-filter" checked={active} onChange={() => setPoeFilter(item.value as 'all' | 'yes' | 'no')} className="h-4 w-4 accent-[#2ad1a4]" />
+                                  {item.label}
+                                </span>
+                              </label>
+                            )
+                          })}
+                        </div>
                       </div>
                     </>
                   )}
@@ -1988,48 +1937,19 @@ export default function Home() {
                       <div className="rounded-xl bg-[#f8fafc] p-3">
                         <p className="mb-2 text-xs font-bold uppercase tracking-widest text-[#7a8fa3]">Marque</p>
                         <div className="space-y-2">
-                          <label
-                            className={`flex cursor-pointer items-center justify-between rounded-lg border px-3 py-2 text-sm transition ${selectedBrand === null ? 'border-[#2ad1a4] bg-[#f0fdf9] text-[#1a3a52] ring-1 ring-[#2ad1a4]' : 'border-[#d0d9e3] bg-white text-[#334e68] hover:border-[#a5b8cc] hover:bg-[#f9fbfc]'}`}
-                          >
+                          <label className={`flex cursor-pointer items-center justify-between rounded-lg border px-3 py-2 text-sm transition ${selectedBrand === null ? 'border-[#2ad1a4] bg-[#f0fdf9] text-[#1a3a52] ring-1 ring-[#2ad1a4]' : 'border-[#d0d9e3] bg-white text-[#334e68] hover:border-[#a5b8cc] hover:bg-[#f9fbfc]'}`}>
                             <span className="flex items-center gap-2">
-                              <input
-                                type="radio"
-                                name="products-brand-filter"
-                                checked={selectedBrand === null}
-                                onChange={() => {
-                                  setSelectedBrand(null)
-                                  setSelectedSeries(null)
-                                  setSelectedModel(null)
-                                  setSelectedSpecFilters({})
-                                }}
-                                className="h-4 w-4 accent-[#2ad1a4]"
-                              />
+                              <input type="radio" name="products-brand-filter" checked={selectedBrand === null} onChange={() => { setSelectedBrand(null); setSelectedSeries(null); setSelectedModel(null); setSelectedSpecFilters({}) }} className="h-4 w-4 accent-[#2ad1a4]" />
                               Toutes
                             </span>
                             <span className="text-xs text-[#7a8fa3]">({productBrandTotal})</span>
                           </label>
-
                           {productBrandOptions.map((item) => {
                             const active = selectedBrand === item.brandId
-
                             return (
-                              <label
-                                key={item.brandId}
-                                className={`flex cursor-pointer items-center justify-between rounded-lg border px-3 py-2 text-sm transition ${active ? 'border-[#2ad1a4] bg-[#f0fdf9] text-[#1a3a52] ring-1 ring-[#2ad1a4]' : 'border-[#d0d9e3] bg-white text-[#334e68] hover:border-[#a5b8cc] hover:bg-[#f9fbfc]'}`}
-                              >
+                              <label key={item.brandId} className={`flex cursor-pointer items-center justify-between rounded-lg border px-3 py-2 text-sm transition ${active ? 'border-[#2ad1a4] bg-[#f0fdf9] text-[#1a3a52] ring-1 ring-[#2ad1a4]' : 'border-[#d0d9e3] bg-white text-[#334e68] hover:border-[#a5b8cc] hover:bg-[#f9fbfc]'}`}>
                                 <span className="flex items-center gap-2">
-                                  <input
-                                    type="radio"
-                                    name="products-brand-filter"
-                                    checked={active}
-                                    onChange={() => {
-                                      setSelectedBrand(item.brandId)
-                                      setSelectedSeries(null)
-                                      setSelectedModel(null)
-                                      setSelectedSpecFilters({})
-                                    }}
-                                    className="h-4 w-4 accent-[#2ad1a4]"
-                                  />
+                                  <input type="radio" name="products-brand-filter" checked={active} onChange={() => { setSelectedBrand(item.brandId); setSelectedSeries(null); setSelectedModel(null); setSelectedSpecFilters({}) }} className="h-4 w-4 accent-[#2ad1a4]" />
                                   {item.name}
                                 </span>
                                 <span className="text-xs text-[#7a8fa3]">({item.count})</span>
@@ -2044,55 +1964,24 @@ export default function Home() {
                           {selectedBrandRecord ? `Famille - ${selectedBrandRecord.name}` : 'Famille'}
                         </p>
                         {!selectedBrand ? (
-                          <p className="rounded-lg border border-[#d0d9e3] bg-white px-3 py-2 text-sm text-[#5a7a9a]">
-                            Selectionnez une marque pour afficher les familles.
-                          </p>
+                          <p className="rounded-lg border border-[#d0d9e3] bg-white px-3 py-2 text-sm text-[#5a7a9a]">Selectionnez une marque pour afficher les familles.</p>
                         ) : productFamilyOptions.length === 0 ? (
-                          <p className="rounded-lg border border-[#d0d9e3] bg-white px-3 py-2 text-sm text-[#5a7a9a]">
-                            Aucune famille trouvee pour cette marque.
-                          </p>
+                          <p className="rounded-lg border border-[#d0d9e3] bg-white px-3 py-2 text-sm text-[#5a7a9a]">Aucune famille trouvee pour cette marque.</p>
                         ) : (
                           <div className="space-y-2">
-                            <label
-                              className={`flex cursor-pointer items-center justify-between rounded-lg border px-3 py-2 text-sm transition ${selectedSeries === null ? 'border-[#2ad1a4] bg-[#f0fdf9] text-[#1a3a52] ring-1 ring-[#2ad1a4]' : 'border-[#d0d9e3] bg-white text-[#334e68] hover:border-[#a5b8cc] hover:bg-[#f9fbfc]'}`}
-                            >
+                            <label className={`flex cursor-pointer items-center justify-between rounded-lg border px-3 py-2 text-sm transition ${selectedSeries === null ? 'border-[#2ad1a4] bg-[#f0fdf9] text-[#1a3a52] ring-1 ring-[#2ad1a4]' : 'border-[#d0d9e3] bg-white text-[#334e68] hover:border-[#a5b8cc] hover:bg-[#f9fbfc]'}`}>
                               <span className="flex items-center gap-2">
-                                <input
-                                  type="radio"
-                                  name="products-family-filter"
-                                  checked={selectedSeries === null}
-                                  onChange={() => {
-                                    setSelectedSeries(null)
-                                    setSelectedModel(null)
-                                    setSelectedSpecFilters({})
-                                  }}
-                                  className="h-4 w-4 accent-[#2ad1a4]"
-                                />
+                                <input type="radio" name="products-family-filter" checked={selectedSeries === null} onChange={() => { setSelectedSeries(null); setSelectedModel(null); setSelectedSpecFilters({}) }} className="h-4 w-4 accent-[#2ad1a4]" />
                                 Toutes
                               </span>
                               <span className="text-xs text-[#7a8fa3]">({productFamilyTotal})</span>
                             </label>
-
                             {productFamilyOptions.map((item) => {
                               const active = selectedSeries === item.seriesId
-
                               return (
-                                <label
-                                  key={item.seriesId}
-                                  className={`flex cursor-pointer items-center justify-between rounded-lg border px-3 py-2 text-sm transition ${active ? 'border-[#2ad1a4] bg-[#f0fdf9] text-[#1a3a52] ring-1 ring-[#2ad1a4]' : 'border-[#d0d9e3] bg-white text-[#334e68] hover:border-[#a5b8cc] hover:bg-[#f9fbfc]'}`}
-                                >
+                                <label key={item.seriesId} className={`flex cursor-pointer items-center justify-between rounded-lg border px-3 py-2 text-sm transition ${active ? 'border-[#2ad1a4] bg-[#f0fdf9] text-[#1a3a52] ring-1 ring-[#2ad1a4]' : 'border-[#d0d9e3] bg-white text-[#334e68] hover:border-[#a5b8cc] hover:bg-[#f9fbfc]'}`}>
                                   <span className="flex items-center gap-2">
-                                    <input
-                                      type="radio"
-                                      name="products-family-filter"
-                                      checked={active}
-                                      onChange={() => {
-                                        setSelectedSeries(item.seriesId)
-                                        setSelectedModel(null)
-                                        setSelectedSpecFilters({})
-                                      }}
-                                      className="h-4 w-4 accent-[#2ad1a4]"
-                                    />
+                                    <input type="radio" name="products-family-filter" checked={active} onChange={() => { setSelectedSeries(item.seriesId); setSelectedModel(null); setSelectedSpecFilters({}) }} className="h-4 w-4 accent-[#2ad1a4]" />
                                     {item.name}
                                   </span>
                                   <span className="text-xs text-[#7a8fa3]">({item.count})</span>
@@ -2114,19 +2003,10 @@ export default function Home() {
                             <div className="space-y-2">
                               {group.options.map((option) => {
                                 const checked = (selectedSpecFilters[group.key] ?? []).includes(option.value)
-
                                 return (
-                                  <label
-                                    key={`${group.key}-${option.value}`}
-                                    className={`flex cursor-pointer items-center justify-between rounded-lg border px-3 py-2 text-sm transition ${checked ? 'border-[#2ad1a4] bg-[#f0fdf9] text-[#1a3a52] ring-1 ring-[#2ad1a4]' : 'border-[#d0d9e3] bg-white text-[#334e68] hover:border-[#a5b8cc] hover:bg-[#f9fbfc]'}`}
-                                  >
+                                  <label key={`${group.key}-${option.value}`} className={`flex cursor-pointer items-center justify-between rounded-lg border px-3 py-2 text-sm transition ${checked ? 'border-[#2ad1a4] bg-[#f0fdf9] text-[#1a3a52] ring-1 ring-[#2ad1a4]' : 'border-[#d0d9e3] bg-white text-[#334e68] hover:border-[#a5b8cc] hover:bg-[#f9fbfc]'}`}>
                                     <span className="flex items-center gap-2">
-                                      <input
-                                        type="checkbox"
-                                        checked={checked}
-                                        onChange={(event) => toggleStandardSpecFilter(group.key, option.value, event.target.checked)}
-                                        className="h-4 w-4 accent-[#2ad1a4]"
-                                      />
+                                      <input type="checkbox" checked={checked} onChange={(event) => toggleStandardSpecFilter(group.key, option.value, event.target.checked)} className="h-4 w-4 accent-[#2ad1a4]" />
                                       {option.value}
                                     </span>
                                     <span className="text-xs text-[#7a8fa3]">({option.count})</span>
@@ -2169,9 +2049,7 @@ export default function Home() {
                   <p className="mt-4 font-semibold text-[#1a3a52]">Aucun modele trouve</p>
                   <p className="mt-1 text-sm">
                     Essayez d&apos;autres filtres ou{' '}
-                    <button onClick={clearFilters} className="text-[#2ad1a4] underline">
-                      reinitialisez la recherche
-                    </button>
+                    <button onClick={clearFilters} className="text-[#2ad1a4] underline">reinitialisez la recherche</button>
                   </p>
                 </div>
               ) : (
@@ -2185,34 +2063,42 @@ export default function Home() {
 
                     return (
                       <article key={model.id} className="group flex flex-col overflow-hidden rounded-xl border border-[#d0d9e3] bg-white shadow-sm transition-all duration-200 hover:-translate-y-1 hover:border-[#a5b8cc] hover:shadow-lg">
-                        <div className="relative aspect-[4/3] overflow-hidden bg-[#f5f7fa]">
-                          {model.image ? (
-                            <Image
-                              src={model.image}
-                              alt={model.name}
-                              width={640}
-                              height={480}
-                              className="h-full w-full object-cover transition-transform duration-300 group-hover:scale-105"
-                            />
-                          ) : (
-                            <div className="flex h-full items-center justify-center">
-                              <Package className="h-10 w-10 text-[#d0d9e3]" />
+                        {model.condition === 'STANDARD' ? (
+                          <Link href={`/product/${model.id}`} className="block">
+                            <div className="relative aspect-[4/3] overflow-hidden bg-[#f5f7fa]">
+                              {model.image ? (
+                                <Image src={model.image} alt={model.name} width={640} height={480} className="h-full w-full object-cover transition-transform duration-300 group-hover:scale-105" />
+                              ) : (
+                                <div className="flex h-full items-center justify-center"><Package className="h-10 w-10 text-[#d0d9e3]" /></div>
+                              )}
                             </div>
-                          )}
-                        </div>
+                          </Link>
+                        ) : (
+                          <div className="relative aspect-[4/3] overflow-hidden bg-[#f5f7fa]">
+                            {model.image ? (
+                              <Image src={model.image} alt={model.name} width={640} height={480} className="h-full w-full object-cover transition-transform duration-300 group-hover:scale-105" />
+                            ) : (
+                              <div className="flex h-full items-center justify-center"><Package className="h-10 w-10 text-[#d0d9e3]" /></div>
+                            )}
+                          </div>
+                        )}
 
                         <div className="flex flex-1 flex-col gap-3 p-4">
                           <div>
-                            <h3 className="line-clamp-2 font-bold leading-snug text-[#1a3a52] group-hover:text-[#0f2d45]">{fullName}</h3>
+                            {model.condition === 'STANDARD' ? (
+                              <Link href={`/product/${model.id}`} className="hover:underline">
+                                <h3 className="line-clamp-2 font-bold leading-snug text-[#1a3a52] group-hover:text-[#0f2d45]">{fullName}</h3>
+                              </Link>
+                            ) : (
+                              <h3 className="line-clamp-2 font-bold leading-snug text-[#1a3a52] group-hover:text-[#0f2d45]">{fullName}</h3>
+                            )}
                             {brand && <p className="mt-1 text-sm font-semibold text-[#1a3a52]">{brand.name}</p>}
                           </div>
 
                           <div className="mt-auto flex items-center justify-between border-t border-[#f0f3f6] pt-3">
-                            <div className="flex items-center gap-2">
-                              <span className={isInStock ? 'text-xs font-semibold text-emerald-700' : 'text-xs font-semibold text-amber-700'}>
-                                {isInStock ? 'En stock' : 'Rupture'}
-                              </span>
-                            </div>
+                            <span className={isInStock ? 'text-xs font-semibold text-emerald-700' : 'text-xs font-semibold text-amber-700'}>
+                              {isInStock ? 'En stock' : 'Rupture'}
+                            </span>
                           </div>
 
                           <div className="flex items-center justify-between pt-2">
@@ -2220,21 +2106,14 @@ export default function Home() {
                             <button
                               type="button"
                               onClick={() => {
-                                if (isConfiguratorDomain) {
-                                  openModelConfigurator(model.id, undefined, { isOutOfStock: !isInStock })
-                                  return
-                                }
+                                if (isConfiguratorDomain) { openModelConfigurator(model.id, undefined, { isOutOfStock: !isInStock }); return }
                                 addStandardProductToCart(model)
                               }}
                               disabled={isConfiguratorDomain ? false : !isInStock}
                               className={`inline-flex items-center justify-center rounded-full p-2 text-white transition ${isConfiguratorDomain ? 'bg-[#2ad1a4] hover:bg-[#20b890]' : isInStock ? 'bg-[#2ad1a4] hover:bg-[#20b890]' : 'cursor-not-allowed bg-slate-300 text-slate-500'}`}
                               title={isConfiguratorDomain ? 'Configurer le modèle' : isInStock ? 'Ajouter au panier' : 'Rupture de stock'}
                             >
-                              {isConfiguratorDomain ? (
-                                <Sliders className="h-5 w-5" />
-                              ) : (
-                                <ShoppingCart className="h-5 w-5" />
-                              )}
+                              {isConfiguratorDomain ? <Sliders className="h-5 w-5" /> : <ShoppingCart className="h-5 w-5" />}
                             </button>
                           </div>
                         </div>
@@ -2248,38 +2127,15 @@ export default function Home() {
                 <Pagination className="pt-2">
                   <PaginationContent>
                     <PaginationItem>
-                      <PaginationPrevious
-                        href="#"
-                        text="Precedent"
-                        onClick={(event) => {
-                          event.preventDefault()
-                          setCurrentPage((page) => Math.max(1, page - 1))
-                        }}
-                      />
+                      <PaginationPrevious href="#" text="Precedent" onClick={(event) => { event.preventDefault(); setCurrentPage((page) => Math.max(1, page - 1)) }} />
                     </PaginationItem>
                     {Array.from({ length: totalPages }, (_, index) => index + 1).map((page) => (
                       <PaginationItem key={page}>
-                        <PaginationLink
-                          href="#"
-                          isActive={page === safePage}
-                          onClick={(event) => {
-                            event.preventDefault()
-                            setCurrentPage(page)
-                          }}
-                        >
-                          {page}
-                        </PaginationLink>
+                        <PaginationLink href="#" isActive={page === safePage} onClick={(event) => { event.preventDefault(); setCurrentPage(page) }}>{page}</PaginationLink>
                       </PaginationItem>
                     ))}
                     <PaginationItem>
-                      <PaginationNext
-                        href="#"
-                        text="Suivant"
-                        onClick={(event) => {
-                          event.preventDefault()
-                          setCurrentPage((page) => Math.min(totalPages, page + 1))
-                        }}
-                      />
+                      <PaginationNext href="#" text="Suivant" onClick={(event) => { event.preventDefault(); setCurrentPage((page) => Math.min(totalPages, page + 1)) }} />
                     </PaginationItem>
                   </PaginationContent>
                 </Pagination>
@@ -2298,34 +2154,28 @@ export default function Home() {
 
                 return (
                   <article key={model.id} className="group flex flex-col overflow-hidden rounded-xl border border-[#d0d9e3] bg-white shadow-sm transition-all duration-200 hover:-translate-y-1 hover:border-[#a5b8cc] hover:shadow-lg">
-                    <div className="relative aspect-[4/3] overflow-hidden bg-[#f5f7fa]">
-                      {model.image ? (
-                        <Image
-                          src={model.image}
-                          alt={model.name}
-                          width={640}
-                          height={480}
-                          className="h-full w-full object-cover transition-transform duration-300 group-hover:scale-105"
-                        />
-                      ) : (
-                        <div className="flex h-full items-center justify-center">
-                          <Package className="h-10 w-10 text-[#d0d9e3]" />
-                        </div>
-                      )}
-                    </div>
+                    <Link href={`/product/${model.id}`} className="block">
+                      <div className="relative aspect-[4/3] overflow-hidden bg-[#f5f7fa]">
+                        {model.image ? (
+                          <Image src={model.image} alt={model.name} width={640} height={480} className="h-full w-full object-cover transition-transform duration-300 group-hover:scale-105" />
+                        ) : (
+                          <div className="flex h-full items-center justify-center"><Package className="h-10 w-10 text-[#d0d9e3]" /></div>
+                        )}
+                      </div>
+                    </Link>
 
                     <div className="flex flex-1 flex-col gap-3 p-4">
                       <div>
-                        <h3 className="line-clamp-2 font-bold leading-snug text-[#1a3a52] group-hover:text-[#0f2d45]">{fullName}</h3>
+                        <Link href={`/product/${model.id}`} className="hover:underline">
+                          <h3 className="line-clamp-2 font-bold leading-snug text-[#1a3a52] group-hover:text-[#0f2d45]">{fullName}</h3>
+                        </Link>
                         {brand && <p className="mt-1 text-sm font-semibold text-[#1a3a52]">{brand.name}</p>}
                       </div>
 
                       <div className="mt-auto flex items-center justify-between border-t border-[#f0f3f6] pt-3">
-                        <div className="flex items-center gap-2">
-                          <span className={isInStock ? 'text-xs font-semibold text-emerald-700' : 'text-xs font-semibold text-amber-700'}>
-                            {isInStock ? 'En stock' : 'Rupture'}
-                          </span>
-                        </div>
+                        <span className={isInStock ? 'text-xs font-semibold text-emerald-700' : 'text-xs font-semibold text-amber-700'}>
+                          {isInStock ? 'En stock' : 'Rupture'}
+                        </span>
                       </div>
 
                       <div className="flex items-center justify-between pt-2">
@@ -2350,38 +2200,15 @@ export default function Home() {
               <Pagination className="pt-2">
                 <PaginationContent>
                   <PaginationItem>
-                    <PaginationPrevious
-                      href="#"
-                      text="Precedent"
-                      onClick={(event) => {
-                        event.preventDefault()
-                        setCurrentPage((page) => Math.max(1, page - 1))
-                      }}
-                    />
+                    <PaginationPrevious href="#" text="Precedent" onClick={(event) => { event.preventDefault(); setCurrentPage((page) => Math.max(1, page - 1)) }} />
                   </PaginationItem>
                   {Array.from({ length: totalPages }, (_, index) => index + 1).map((page) => (
                     <PaginationItem key={page}>
-                      <PaginationLink
-                        href="#"
-                        isActive={page === safePage}
-                        onClick={(event) => {
-                          event.preventDefault()
-                          setCurrentPage(page)
-                        }}
-                      >
-                        {page}
-                      </PaginationLink>
+                      <PaginationLink href="#" isActive={page === safePage} onClick={(event) => { event.preventDefault(); setCurrentPage(page) }}>{page}</PaginationLink>
                     </PaginationItem>
                   ))}
                   <PaginationItem>
-                    <PaginationNext
-                      href="#"
-                      text="Suivant"
-                      onClick={(event) => {
-                        event.preventDefault()
-                        setCurrentPage((page) => Math.min(totalPages, page + 1))
-                      }}
-                    />
+                    <PaginationNext href="#" text="Suivant" onClick={(event) => { event.preventDefault(); setCurrentPage((page) => Math.min(totalPages, page + 1)) }} />
                   </PaginationItem>
                 </PaginationContent>
               </Pagination>

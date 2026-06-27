@@ -4,7 +4,7 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import Image from 'next/image'
 import Link from 'next/link'
 import { useRouter } from 'next/navigation'
-import { Mail, Phone, Lock } from 'lucide-react'
+import { Mail, Phone, Lock, ChevronDown, CheckCircle2, ShoppingCart, Package, CreditCard, MapPin, Truck, User, LogOut, Bell, ChevronRight, Shield, RefreshCw } from 'lucide-react'
 import { toast } from 'sonner'
 
 import { useAuth } from '@/context/AuthContext'
@@ -41,7 +41,7 @@ const FORM_FIELDS_CONFIG = [
     { id: 'city', label: 'Ville', type: 'text', required: true, section: 'address', colSpan: 'half' },
     { id: 'country', label: 'Pays', type: 'text', required: false, section: 'address', colSpan: 'full', defaultValue: 'France' },
     { id: 'phone', label: 'Numéro de téléphone', type: 'tel', required: true, section: 'address', colSpan: 'half' },
-    { id: 'invoiceEmail', label: 'Adresse e-mail de facture', type: 'email', required: false, section: 'address', colSpan: 'half' },
+    { id: 'invoiceEmail', label: 'E-mail de facture', type: 'email', required: false, section: 'address', colSpan: 'half' },
     { id: 'vatNumber', label: 'Numéro de TVA', type: 'text', required: false, section: 'address', colSpan: 'full' },
     { id: 'orderNumber', label: 'Numéro de bon de commande', type: 'text', required: false, section: 'address', colSpan: 'full' },
 ]
@@ -63,9 +63,9 @@ const PAYMENT_METHODS_CONFIG = [
 ] as const
 
 const SECTIONS_CONFIG = [
-    { id: 'address', title: 'Adresse de livraison', step: 2 },
-    { id: 'shipping', title: 'Modes de livraison', step: 2 },
-    { id: 'payment', title: 'Modes de paiement', step: 2 },
+    { id: 'address', title: 'Adresse de livraison', icon: MapPin, step: 2 },
+    { id: 'shipping', title: 'Modes de livraison', icon: Truck, step: 2 },
+    { id: 'payment', title: 'Modes de paiement', icon: CreditCard, step: 2 },
 ] as const
 
 type Step = {
@@ -117,7 +117,6 @@ export default function CheckoutPage() {
     const tax = subtotal * VAT_RATE
     const orderTotal = subtotal + tax + shippingPrice
 
-    // Fetch notifications
     useEffect(() => {
         if (!isAuthenticated) return
         async function fetchNotifications() {
@@ -127,19 +126,17 @@ export default function CheckoutPage() {
                     const data = await res.json()
                     setNotifications(data.notifications ?? [])
                 }
-            } catch { /* silencieux */ }
+            } catch { }
         }
         void fetchNotifications()
         const interval = setInterval(fetchNotifications, 30000)
         return () => clearInterval(interval)
     }, [isAuthenticated])
 
-    // Total des notifications non lues (tous types confondus)
     const totalUnreadCount = useMemo(
         () => notifications.filter((n) => !n.isRead).length,
         [notifications]
     )
-
 
     const orderUnread = useMemo(
         () => notifications.filter((n) => !n.isRead && (n.type === 'ORDER_STATUS_UPDATE' || n.referenceType === 'ORDER')).length,
@@ -216,13 +213,16 @@ export default function CheckoutPage() {
 
     if (loading) {
         return (
-            <div className="flex min-h-screen items-center justify-center bg-[#f5f7fa]">
-                <div className="h-10 w-10 animate-spin rounded-full border-4 border-[#d0d9e3] border-t-[#2ad1a4]" />
+            <div className="flex min-h-screen items-center justify-center bg-slate-50">
+                <div className="flex flex-col items-center gap-4">
+                    <div className="h-12 w-12 animate-spin rounded-full border-4 border-slate-200 border-t-emerald-500" />
+                    <p className="text-sm font-medium text-slate-500">Chargement…</p>
+                </div>
             </div>
         )
     }
 
-    if (!isAuthenticated) return <div className="min-h-screen bg-[#f3f3f5]" />
+    if (!isAuthenticated) return <div className="min-h-screen bg-slate-50" />
 
     const profileHref = isAdmin ? '/admin' : '/client/profile'
     const orderHref = isAdmin ? '/admin' : '/client/orders'
@@ -230,7 +230,7 @@ export default function CheckoutPage() {
 
     const renderFormFields = () => {
         const fields = FORM_FIELDS_CONFIG.filter(field => field.section === 'address')
-        const rows = []
+        const rows: React.ReactNode[] = []
         for (let i = 0; i < fields.length; i++) {
             const field = fields[i]
             if (field.colSpan === 'full') {
@@ -243,7 +243,7 @@ export default function CheckoutPage() {
                 const nextField = fields[i + 1]
                 if (nextField?.colSpan === 'half') {
                     rows.push(
-                        <div key={`${field.id}-${nextField.id}`} className="grid gap-4 sm:grid-cols-2 col-span-full">
+                        <div key={`${field.id}-${nextField.id}`} className="col-span-full grid gap-4 sm:grid-cols-2">
                             <Field label={field.label} type={field.type} required={field.required} value={formData[field.id]} onChange={(v) => setFormData(p => ({ ...p, [field.id]: v }))} />
                             <Field label={nextField.label} type={nextField.type} required={nextField.required} value={formData[nextField.id]} onChange={(v) => setFormData(p => ({ ...p, [nextField.id]: v }))} />
                         </div>
@@ -256,86 +256,101 @@ export default function CheckoutPage() {
     }
 
     return (
-        <div className="min-h-screen bg-[#f3f3f5] text-[#1a3a52]">
+        <div className="min-h-screen bg-slate-50 text-slate-800">
 
-            {/* ── HEADER responsive ── */}
-            <header className="bg-[#1a3a52] shadow-lg">
-                <div className="mx-auto max-w-7xl px-3 sm:px-6 lg:px-8">
+            {/* ── HEADER ── */}
+            <header className="sticky top-0 z-40 border-b border-white/10 bg-[#0f2537] shadow-lg shadow-black/20">
+                <div className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8">
+                    <div className="flex h-16 items-center justify-between gap-4 sm:h-18">
 
-                    <div className="flex h-14 items-center justify-between gap-3 sm:h-16">
-
-                        <Link href="/" aria-label="Accueil" className="shrink-0">
-                            <Image src="/redsys-logo.png" alt="Redsys" width={120} height={36} className="h-8 w-auto sm:h-10" priority />
+                        {/* Logo */}
+                        <Link href="/" aria-label="Accueil" className="shrink-0 transition-opacity hover:opacity-80">
+                            <Image src="/redsys-logo.png" alt="Redsys" width={130} height={38} className="h-9 w-auto sm:h-10" priority />
                         </Link>
 
-                        <div className="hidden items-center gap-2 sm:flex sm:gap-3">
+                        {/* Steps — desktop */}
+                        <nav className="hidden items-center gap-1 sm:flex" aria-label="Étapes de commande">
                             {STEPS_CONFIG.map((step, idx) => (
                                 <React.Fragment key={step.number}>
-                                    {idx > 0 && <div className="h-px w-4 bg-white/30 sm:w-8" />}
+                                    {idx > 0 && (
+                                        <div className="mx-2 flex items-center">
+                                            <ChevronRight className="h-4 w-4 text-white/20" />
+                                        </div>
+                                    )}
                                     <StepBadge number={step.number} label={step.label} active={step.active} done={!step.active && step.number === 1} href={step.href} />
                                 </React.Fragment>
                             ))}
-                        </div>
+                        </nav>
 
-                        <div className="flex shrink-0 items-center gap-2">
-                            <Link href="/cart" className="hidden items-center gap-1 rounded-full border border-white/20 px-2.5 py-1.5 text-xs font-medium text-white/70 transition hover:bg-white/10 sm:flex">
-                                ← Panier
+                        {/* Right actions */}
+                        <div className="flex shrink-0 items-center gap-2.5">
+                            <Link href="/cart"
+                                className="hidden items-center gap-1.5 rounded-lg border border-white/15 px-3 py-1.5 text-xs font-medium text-white/70 transition hover:border-white/30 hover:bg-white/10 hover:text-white sm:flex">
+                                <ShoppingCart className="h-3.5 w-3.5" />
+                                Panier
                             </Link>
 
                             <div ref={userMenuRef} className="relative">
-                                <button type="button" onClick={() => setUserMenuOpen((v) => !v)}
-                                    className="flex items-center gap-1.5 rounded-full bg-white/10 px-2 py-1.5 transition hover:bg-white/20 sm:px-3">
-                                    <div className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-[#2ad1a4] text-xs font-black text-[#1a3a52] sm:h-8 sm:w-8 sm:text-sm">
+                                <button
+                                    type="button"
+                                    onClick={() => setUserMenuOpen((v) => !v)}
+                                    className="flex items-center gap-2 rounded-xl border border-white/15 bg-white/5 px-2.5 py-1.5 transition hover:border-white/25 hover:bg-white/10"
+                                    aria-expanded={userMenuOpen}
+                                    aria-haspopup="true"
+                                >
+                                    <div className="relative flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-gradient-to-br from-emerald-400 to-emerald-600 text-xs font-bold text-white shadow-sm">
                                         {user?.name?.charAt(0).toUpperCase() || user?.email?.charAt(0).toUpperCase()}
+                                        {totalUnreadCount > 0 && (
+                                            <span className="absolute -right-1 -top-1 flex h-4 min-w-4 items-center justify-center rounded-full bg-rose-500 px-0.5 text-[9px] font-black text-white ring-2 ring-[#0f2537]">
+                                                {totalUnreadCount > 99 ? '99+' : totalUnreadCount}
+                                            </span>
+                                        )}
                                     </div>
-                                    <span className="hidden max-w-[90px] truncate text-xs font-semibold text-white sm:inline sm:max-w-[120px] sm:text-sm">
+                                    <span className="hidden max-w-[110px] truncate text-sm font-medium text-white/90 sm:block">
                                         {user?.name || user?.email}
                                     </span>
-                                    {totalUnreadCount > 0 && (
-                                        <span className="ml-1 flex h-5 min-w-5 items-center justify-center rounded-full bg-red-500 px-1 text-[10px] font-black text-white shadow-md">
-                                            {totalUnreadCount > 99 ? '99+' : totalUnreadCount}
-                                        </span>
-                                    )}
+                                    <ChevronDown className={`hidden h-3.5 w-3.5 text-white/50 transition-transform duration-200 sm:block ${userMenuOpen ? 'rotate-180' : ''}`} />
                                 </button>
 
                                 {userMenuOpen && (
-                                    <div className="absolute right-0 top-full z-50 mt-2 w-44 overflow-hidden rounded-xl border border-[#d0d9e3] bg-white shadow-xl sm:w-52">
-                                        <Link href={profileHref} onClick={() => setUserMenuOpen(false)}
-                                            className="flex items-center gap-2 px-4 py-3 text-sm text-[#1a3a52] transition hover:bg-[#f0fdf9]">
-                                            Mon profil
-                                        </Link>
-                                        <Link href={orderHref} onClick={() => setUserMenuOpen(false)}
-                                            className="flex items-center justify-between px-4 py-3 text-sm text-[#1a3a52] transition hover:bg-[#f0fdf9]">
-                                            <span>Mes commandes</span>
-                                            {orderUnread > 0 && (
-                                                <span className="rounded-full bg-red-100 px-1.5 py-0.5 text-[10px] font-bold text-red-600">
-                                                    {orderUnread}
-                                                </span>
-                                            )}
-                                        </Link>
-                                        <Link href={ticketsHref} onClick={() => setUserMenuOpen(false)}
-                                            className="flex items-center justify-between px-4 py-3 text-sm text-[#1a3a52] transition hover:bg-[#f0fdf9]">
-                                            <span>Mes Tickets</span>
-                                            {ticketUnread > 0 && (
-                                                <span className="rounded-full bg-red-100 px-1.5 py-0.5 text-[10px] font-bold text-red-600">
-                                                    {ticketUnread}
-                                                </span>
-                                            )}
-                                        </Link>
-                                        <button onClick={() => { logout(); setUserMenuOpen(false) }}
-                                            className="flex w-full items-center gap-2 border-t border-[#eef1f5] px-4 py-3 text-sm text-red-500 transition hover:bg-red-50">
-                                            Se déconnecter
-                                        </button>
+                                    <div className="absolute right-0 top-full z-50 mt-2 w-52 overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-2xl shadow-black/10">
+                                        <div className="border-b border-slate-100 px-4 py-3">
+                                            <p className="text-xs text-slate-400">Connecté en tant que</p>
+                                            <p className="mt-0.5 truncate text-sm font-semibold text-slate-700">{user?.name || user?.email}</p>
+                                        </div>
+
+                                        <div className="py-1.5">
+                                            <MenuLink href={profileHref} icon={<User className="h-4 w-4" />} onClick={() => setUserMenuOpen(false)}>
+                                                Mon profil
+                                            </MenuLink>
+                                            <MenuLink href={orderHref} icon={<Package className="h-4 w-4" />} onClick={() => setUserMenuOpen(false)} badge={orderUnread}>
+                                                Mes commandes
+                                            </MenuLink>
+                                            <MenuLink href={ticketsHref} icon={<Bell className="h-4 w-4" />} onClick={() => setUserMenuOpen(false)} badge={ticketUnread}>
+                                                Mes Tickets
+                                            </MenuLink>
+                                        </div>
+
+                                        <div className="border-t border-slate-100 py-1.5">
+                                            <button
+                                                onClick={() => { logout(); setUserMenuOpen(false) }}
+                                                className="flex w-full items-center gap-2.5 px-4 py-2.5 text-sm font-medium text-rose-500 transition hover:bg-rose-50"
+                                            >
+                                                <LogOut className="h-4 w-4" />
+                                                Se déconnecter
+                                            </button>
+                                        </div>
                                     </div>
                                 )}
                             </div>
                         </div>
                     </div>
 
-                    <div className="flex items-center justify-center gap-2 pb-2 sm:hidden">
+                    {/* Steps — mobile */}
+                    <div className="flex items-center justify-center gap-1 pb-3 sm:hidden">
                         {STEPS_CONFIG.map((step, idx) => (
                             <React.Fragment key={step.number}>
-                                {idx > 0 && <div className="h-px w-5 bg-white/30" />}
+                                {idx > 0 && <div className="mx-1 h-px w-6 bg-white/20" />}
                                 <StepBadge number={step.number} label={step.label} active={step.active} done={!step.active && step.number === 1} href={step.href} />
                             </React.Fragment>
                         ))}
@@ -344,183 +359,304 @@ export default function CheckoutPage() {
             </header>
 
             {/* ── MAIN ── */}
-            <main className="mx-auto max-w-7xl px-3 py-5 sm:px-6 sm:py-8 lg:px-8">
-                <h1 className="mb-4 text-2xl font-black tracking-tight text-black sm:mb-6 sm:text-3xl">
-                    Commander
-                </h1>
+            <main className="mx-auto max-w-7xl px-4 py-6 sm:px-6 sm:py-10 lg:px-8">
 
-                <div className="grid gap-5 lg:grid-cols-[minmax(0,1fr)_360px] lg:gap-6 xl:grid-cols-[minmax(0,1fr)_380px]">
+                {/* Page title */}
+                <div className="mb-6 sm:mb-8">
+                    <h1 className="text-2xl font-extrabold tracking-tight text-slate-800 sm:text-3xl">
+                        Finaliser ma commande
+                    </h1>
+                    <p className="mt-1 text-sm text-slate-500">Complétez les informations ci-dessous pour valider votre achat.</p>
+                </div>
 
-                    <section className="space-y-3 sm:space-y-4">
-                        {SECTIONS_CONFIG.map((section) => (
-                            <AccordionSection
-                                key={section.id}
-                                id={section.id}
-                                title={section.title}
-                                open={openSection === section.id}
-                                onToggle={() => setOpenSection(section.id)}
-                                summary={
-                                    section.id === 'shipping'
-                                        ? `${shippingMethod === 'standard' ? 'Standard' : 'Express'} — ${formatCurrency(SHIPPING_RATES[shippingMethod])}`
-                                        : section.id === 'payment'
-                                            ? PAYMENT_METHODS_CONFIG.find(m => m.id === paymentMethod)?.labelMain || paymentMethod
-                                            : undefined
-                                }
-                            >
-                                {section.id === 'address' && (
-                                    <div className="grid grid-cols-1 gap-3 sm:gap-4">
-                                        {renderFormFields()}
-                                        <label className="inline-flex items-center gap-2 text-sm text-[#37495f]">
-                                            <input type="checkbox" checked={formData.neutralDelivery}
-                                                onChange={(e) => setFormData(p => ({ ...p, neutralDelivery: e.target.checked }))}
-                                                className="h-4 w-4 rounded border-[#bfc6d1]" />
-                                            Bon de livraison neutre
-                                        </label>
+                <div className="grid gap-6 lg:grid-cols-[1fr_380px] lg:gap-8 xl:grid-cols-[1fr_400px]">
+
+                    {/* ── LEFT: Sections ── */}
+                    <div className="space-y-4">
+                        {SECTIONS_CONFIG.map((section, sIdx) => {
+                            const Icon = section.icon
+                            const isOpen = openSection === section.id
+                            const summary =
+                                section.id === 'shipping'
+                                    ? `${shippingMethod === 'standard' ? 'Standard' : 'Express'} — ${formatCurrency(SHIPPING_RATES[shippingMethod])}`
+                                    : section.id === 'payment'
+                                        ? PAYMENT_METHODS_CONFIG.find(m => m.id === paymentMethod)?.labelMain
+                                        : undefined
+
+                            return (
+                                <div
+                                    key={section.id}
+                                    className={`overflow-hidden rounded-2xl border transition-all duration-200 ${isOpen ? 'border-emerald-300 shadow-lg shadow-emerald-500/5' : 'border-slate-200 bg-white shadow-sm hover:shadow-md'}`}
+                                >
+                                    <button
+                                        type="button"
+                                        onClick={() => setOpenSection(section.id)}
+                                        className={`flex w-full items-center gap-3 px-5 py-4 text-left transition sm:px-6 ${isOpen ? 'bg-gradient-to-r from-[#0f2537] to-[#1a3a52]' : 'bg-white hover:bg-slate-50'}`}
+                                    >
+                                        <div className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-xl ${isOpen ? 'bg-white/15 text-white' : 'bg-slate-100 text-slate-500'}`}>
+                                            <Icon className="h-4 w-4" />
+                                        </div>
+                                        <div className="flex min-w-0 flex-1 items-center justify-between gap-3">
+                                            <span className={`text-sm font-bold sm:text-base ${isOpen ? 'text-white' : 'text-slate-700'}`}>
+                                                {section.title}
+                                            </span>
+                                            <div className="flex shrink-0 items-center gap-2">
+                                                {!isOpen && summary && (
+                                                    <span className="hidden rounded-lg bg-emerald-50 px-2.5 py-1 text-xs font-semibold text-emerald-700 sm:inline">
+                                                        {summary}
+                                                    </span>
+                                                )}
+                                                <ChevronDown className={`h-4 w-4 transition-transform duration-300 ${isOpen ? 'rotate-180 text-white/70' : 'text-slate-400'}`} />
+                                            </div>
+                                        </div>
+                                    </button>
+
+                                    {isOpen && (
+                                        <div className="bg-white p-5 sm:p-6">
+                                            {section.id === 'address' && (
+                                                <div className="grid grid-cols-1 gap-4">
+                                                    {renderFormFields()}
+                                                    <label className="col-span-full mt-1 flex cursor-pointer items-center gap-3 rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 transition hover:bg-slate-100">
+                                                        <input
+                                                            type="checkbox"
+                                                            checked={formData.neutralDelivery}
+                                                            onChange={(e) => setFormData(p => ({ ...p, neutralDelivery: e.target.checked }))}
+                                                            className="h-4 w-4 cursor-pointer rounded border-slate-300 accent-emerald-500"
+                                                        />
+                                                        <span className="text-sm font-medium text-slate-600">Bon de livraison neutre</span>
+                                                    </label>
+                                                </div>
+                                            )}
+                                            {section.id === 'shipping' && (
+                                                <div className="space-y-2.5">
+                                                    {SHIPPING_METHODS_CONFIG.map((method) => {
+                                                        const selected = shippingMethod === method.id
+                                                        return (
+                                                            <label
+                                                                key={method.id}
+                                                                className={`flex cursor-pointer items-center gap-4 rounded-xl border-2 p-4 transition-all ${selected ? 'border-emerald-400 bg-emerald-50' : 'border-slate-200 bg-slate-50 hover:border-slate-300 hover:bg-slate-100'}`}
+                                                            >
+                                                                <input
+                                                                    type="radio"
+                                                                    name="shipping"
+                                                                    checked={selected}
+                                                                    onChange={() => setShippingMethod(method.id as ShippingMethod)}
+                                                                    className="h-4 w-4 shrink-0 accent-emerald-500"
+                                                                />
+                                                                <div className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-lg ${selected ? 'bg-emerald-100' : 'bg-white'}`}>
+                                                                    <Truck className={`h-5 w-5 ${selected ? 'text-emerald-600' : 'text-slate-400'}`} />
+                                                                </div>
+                                                                <div className="min-w-0 flex-1">
+                                                                    <p className={`text-sm font-semibold ${selected ? 'text-emerald-800' : 'text-slate-700'}`}>{method.labelMain}</p>
+                                                                    <p className="mt-0.5 text-xs text-slate-500">{method.labelRight}</p>
+                                                                </div>
+                                                                <span className={`shrink-0 text-sm font-bold ${selected ? 'text-emerald-700' : 'text-slate-600'}`}>
+                                                                    {formatCurrency(method.getPrice())}
+                                                                </span>
+                                                            </label>
+                                                        )
+                                                    })}
+                                                </div>
+                                            )}
+                                            {section.id === 'payment' && (
+                                                <div className="grid gap-2 sm:grid-cols-2">
+                                                    {PAYMENT_METHODS_CONFIG.map((method) => {
+                                                        const selected = paymentMethod === method.id
+                                                        return (
+                                                            <label
+                                                                key={method.id}
+                                                                className={`flex cursor-pointer items-center gap-3 rounded-xl border-2 px-4 py-3.5 transition-all ${selected ? 'border-emerald-400 bg-emerald-50' : 'border-slate-200 bg-slate-50 hover:border-slate-300 hover:bg-slate-100'}`}
+                                                            >
+                                                                <input
+                                                                    type="radio"
+                                                                    name="payment"
+                                                                    checked={selected}
+                                                                    onChange={() => setPaymentMethod(method.id as PaymentMethod)}
+                                                                    className="h-4 w-4 shrink-0 accent-emerald-500"
+                                                                />
+                                                                <span className="shrink-0">{paymentIcons[method.iconId as keyof typeof paymentIcons]}</span>
+                                                                <span className={`min-w-0 flex-1 text-sm font-medium ${selected ? 'text-emerald-800' : 'text-slate-700'}`}>
+                                                                    {method.labelMain}
+                                                                </span>
+                                                                {selected && <CheckCircle2 className="h-4 w-4 shrink-0 text-emerald-500" />}
+                                                            </label>
+                                                        )
+                                                    })}
+                                                </div>
+                                            )}
+                                        </div>
+                                    )}
+                                </div>
+                            )
+                        })}
+                    </div>
+
+                    {/* ── RIGHT: Order summary ── */}
+                    <aside className="h-fit">
+                        <div className="sticky top-24 overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-xl shadow-slate-200/60">
+
+                            {/* Header */}
+                            <div className="bg-gradient-to-r from-[#0f2537] to-[#1a3a52] px-5 py-4 sm:px-6">
+                                <h2 className="text-base font-bold text-white sm:text-lg">Résumé de la commande</h2>
+                                <p className="mt-0.5 text-xs text-white/50">{items.length} article{items.length !== 1 ? 's' : ''}</p>
+                            </div>
+
+                            <div className="p-5 sm:p-6">
+
+                                {/* Cart items */}
+                                {items.length === 0 ? (
+                                    <div className="flex flex-col items-center gap-3 py-8 text-center">
+                                        <div className="flex h-14 w-14 items-center justify-center rounded-full bg-slate-100">
+                                            <ShoppingCart className="h-6 w-6 text-slate-400" />
+                                        </div>
+                                        <p className="text-sm text-slate-500">Votre panier est vide</p>
+                                    </div>
+                                ) : (
+                                    <div className="space-y-4">
+                                        {items.map((item, idx) => {
+                                            let lineTotal = 0
+                                            if (item.type === 'configurable') {
+                                                const optionsTotal = (item.options ?? []).reduce((s, o) => s + o.price, 0)
+                                                lineTotal = (item.basePrice + optionsTotal) * item.quantity
+                                            } else {
+                                                lineTotal = item.price * item.quantity
+                                            }
+                                            return (
+                                                <div key={`${item.type}-${(item as any).modelId || idx}`} className="flex items-start gap-3">
+                                                    <div className="relative h-14 w-14 shrink-0 overflow-hidden rounded-xl border border-slate-200 bg-slate-50">
+                                                        {item.image ? (
+                                                            <Image src={item.image} alt={item.name} width={56} height={56} className="h-full w-full object-cover" />
+                                                        ) : (
+                                                            <div className="flex h-full w-full items-center justify-center">
+                                                                <Package className="h-5 w-5 text-slate-300" />
+                                                            </div>
+                                                        )}
+                                                        <div className="absolute -right-1.5 -top-1.5 flex h-5 w-5 items-center justify-center rounded-full bg-slate-700 text-[10px] font-bold text-white shadow">
+                                                            {item.quantity}
+                                                        </div>
+                                                    </div>
+                                                    <div className="min-w-0 flex-1">
+                                                        <p className="text-sm font-semibold leading-snug text-slate-700">{item.name}</p>
+                                                        {item.type === 'configurable' && (item.options ?? []).length > 0 && (
+                                                            <ul className="mt-1 space-y-0.5">
+                                                                {(item.options ?? []).map((opt, i) => (
+                                                                    <li key={i} className="truncate text-xs text-slate-400">{opt.label} <span className="text-slate-500">+{formatCurrency(opt.price)}</span></li>
+                                                                ))}
+                                                            </ul>
+                                                        )}
+                                                        {(item as any).type === 'spare' && (item as any).compatibleModelName && (
+                                                            <div className="mt-1.5 inline-flex rounded-full bg-blue-50 px-2 py-0.5 text-xs font-medium text-blue-600">
+                                                                Compatible: {(item as any).compatibleModelName}
+                                                            </div>
+                                                        )}
+                                                    </div>
+                                                    <span className="shrink-0 text-sm font-bold text-slate-800">{formatCurrency(lineTotal)}</span>
+                                                </div>
+                                            )
+                                        })}
                                     </div>
                                 )}
-                                {section.id === 'shipping' && (
-                                    <ChoiceBlockInline
-                                        title="Modes de livraison"
-                                        choices={SHIPPING_METHODS_CONFIG.map(method => ({
-                                            id: method.id,
-                                            labelLeft: formatCurrency(method.getPrice()),
-                                            labelMain: method.labelMain,
-                                            labelRight: method.labelRight,
-                                        }))}
-                                        value={shippingMethod}
-                                        onChange={(value) => setShippingMethod(value as ShippingMethod)}
+
+                                {/* Promo code */}
+                                <div className="mt-5 flex gap-2">
+                                    <input
+                                        type="text"
+                                        placeholder="Code de réduction"
+                                        className="h-10 min-w-0 flex-1 rounded-xl border border-slate-200 bg-slate-50 px-3.5 text-sm text-slate-700 outline-none transition placeholder:text-slate-400 focus:border-emerald-400 focus:bg-white focus:ring-2 focus:ring-emerald-400/20"
                                     />
-                                )}
-                                {section.id === 'payment' && (
-                                    <ChoiceBlockInline
-                                        title="Modes de paiement"
-                                        choices={PAYMENT_METHODS_CONFIG.map(method => ({
-                                            id: method.id,
-                                            labelMain: method.labelMain,
-                                            icon: paymentIcons[method.iconId as keyof typeof paymentIcons],
-                                        }))}
-                                        value={paymentMethod}
-                                        onChange={(value) => setPaymentMethod(value as PaymentMethod)}
-                                    />
-                                )}
-                            </AccordionSection>
-                        ))}
-                    </section>
+                                    <button
+                                        type="button"
+                                        className="h-10 rounded-xl bg-slate-800 px-4 text-sm font-semibold text-white transition hover:bg-slate-700 active:scale-95"
+                                    >
+                                        Appliquer
+                                    </button>
+                                </div>
 
-                    <aside className="h-fit rounded-xl border border-[#d6d8dc] bg-white lg:sticky lg:top-4">
-                        <div className="bg-[#1a3a52] px-4 py-3 text-base font-bold text-white sm:px-5 sm:text-lg">
-                            Résumé de la commande
-                        </div>
-                        <div className="space-y-4 p-4 sm:space-y-5 sm:p-5">
-                            {items.length === 0 ? (
-                                <div className="py-6 text-center text-sm text-gray-500">Votre panier est vide</div>
-                            ) : (
-                                <div className="space-y-3">
-                                    {items.map((item, idx) => {
-                                        let lineTotal = 0
-                                        if (item.type === 'configurable') {
-                                            const optionsTotal = (item.options ?? []).reduce((s, o) => s + o.price, 0)
-                                            lineTotal = (item.basePrice + optionsTotal) * item.quantity
-                                        } else {
-                                            lineTotal = item.price * item.quantity
-                                        }
-                                        return (
-                                            <div key={`${item.type}-${(item as any).modelId || idx}`} className="flex items-start gap-3">
-                                                <div className="h-12 w-12 shrink-0 overflow-hidden rounded border border-[#d6d8dc] bg-white sm:h-14 sm:w-14">
-                                                    {item.image ? (
-                                                        <Image src={item.image} alt={item.name} width={56} height={56} className="h-full w-full object-cover" />
-                                                    ) : (
-                                                        <div className="flex h-full w-full items-center justify-center text-xs text-[#91a2b5]">Img</div>
-                                                    )}
-                                                </div>
-                                                <div className="min-w-0 flex-1">
-                                                    <p className="text-sm font-semibold leading-snug text-[#1a3a52]">{item.name}</p>
-                                                    <div className="mt-0.5 flex items-center justify-between gap-2">
-                                                        <span className="text-xs text-[#5a7a9a]">x{item.quantity}</span>
-                                                        <span className="text-xs font-semibold sm:text-sm">{formatCurrency(lineTotal)}</span>
-                                                    </div>
-                                                    {item.type === 'configurable' && (item.options ?? []).length > 0 && (
-                                                        <ul className="mt-1.5 space-y-0.5 text-xs text-[#5a7a9a]">
-                                                            {(item.options ?? []).map((opt, i) => (
-                                                                <li key={i} className="truncate">{opt.label} +{formatCurrency(opt.price)}</li>
-                                                            ))}
-                                                        </ul>
-                                                    )}
-                                                    {(item as any).type === 'spare' && (item as any).compatibleModelName && (
-                                                        <div className="mt-1.5 inline-flex rounded-full bg-[#f3f4f6] px-2 py-0.5 text-xs text-[#566270]">
-                                                            Compatible avec {(item as any).compatibleModelName}
-                                                        </div>
-                                                    )}
-                                                </div>
-                                            </div>
-                                        )
-                                    })}
+                                {/* Totals */}
+                                <div className="mt-5 space-y-2.5 rounded-xl bg-slate-50 p-4">
+                                    <div className="flex items-center justify-between text-sm">
+                                        <span className="text-slate-500">Sous-total HT</span>
+                                        <span className="font-medium text-slate-700">{formatCurrency(subtotal)}</span>
+                                    </div>
+                                    <div className="flex items-center justify-between text-sm">
+                                        <span className="text-slate-500">TVA ({Math.round(VAT_RATE * 100)}%)</span>
+                                        <span className="font-medium text-slate-700">{formatCurrency(tax)}</span>
+                                    </div>
+                                    <div className="flex items-center justify-between text-sm">
+                                        <span className="text-slate-500">Livraison</span>
+                                        <span className="font-medium text-slate-700">{formatCurrency(shippingPrice)}</span>
+                                    </div>
+                                    <div className="flex items-center justify-between border-t border-slate-200 pt-2.5">
+                                        <span className="text-base font-extrabold text-slate-800">Total TTC</span>
+                                        <span className="text-xl font-extrabold text-slate-900">{formatCurrency(orderTotal)}</span>
+                                    </div>
                                 </div>
-                            )}
 
-                            <div className="border-t border-[#e2e7ed] pt-3 text-sm">
-                                <div className="flex items-center justify-between py-1.5">
-                                    <span className="text-[#5a7a9a]">Sous-total HT</span>
-                                    <span className="font-medium">{formatCurrency(subtotal)}</span>
-                                </div>
-                                <div className="flex items-center justify-between py-1.5">
-                                    <span className="text-[#5a7a9a]">TVA ({Math.round(VAT_RATE * 100)}%)</span>
-                                    <span className="font-medium">{formatCurrency(tax)}</span>
-                                </div>
-                                <div className="flex items-center justify-between py-1.5">
-                                    <span className="text-[#5a7a9a]">Livraison</span>
-                                    <span className="font-medium">{formatCurrency(shippingPrice)}</span>
-                                </div>
-                                <div className="mt-2 flex items-center justify-between border-t border-[#e2e7ed] pt-3">
-                                    <span className="text-base font-black text-black sm:text-lg">Total TTC</span>
-                                    <span className="text-base font-black text-black sm:text-xl">{formatCurrency(orderTotal)}</span>
-                                </div>
-                            </div>
+                                {/* Newsletter */}
+                                <label className="mt-4 flex cursor-pointer items-center gap-2.5 text-sm text-slate-500">
+                                    <input type="checkbox" defaultChecked className="h-4 w-4 cursor-pointer rounded border-slate-300 accent-emerald-500" />
+                                    S&apos;abonner à la newsletter
+                                </label>
 
-                            <div className="flex gap-2">
-                                <input type="text" placeholder="Code de réduction"
-                                    className="h-10 min-w-0 flex-1 rounded border border-[#bfc6d1] px-3 text-sm outline-none focus:ring-2 focus:ring-[#2ad1a4]/40 sm:h-11" />
-                                <button type="button" className="h-10 rounded bg-[#e6eaef] px-3 text-sm font-semibold text-[#1a3a52] transition hover:bg-[#dce3eb] sm:h-11 sm:px-4">
-                                    Appliquer
+                                {/* CTA */}
+                                <button
+                                    type="button"
+                                    onClick={handleSubmitOrder}
+                                    disabled={submitting || items.length === 0}
+                                    className="mt-5 flex h-13 w-full items-center justify-center gap-2.5 rounded-2xl bg-gradient-to-r from-emerald-500 to-emerald-400 text-sm font-bold text-white shadow-lg shadow-emerald-500/30 transition hover:from-emerald-400 hover:to-emerald-500 hover:shadow-xl hover:shadow-emerald-500/40 active:scale-[0.98] disabled:cursor-not-allowed disabled:opacity-50 sm:h-14 sm:text-base"
+                                >
+                                    {submitting ? (
+                                        <>
+                                            <RefreshCw className="h-4 w-4 animate-spin" />
+                                            Traitement en cours…
+                                        </>
+                                    ) : (
+                                        <>
+                                            <Lock className="h-4 w-4" />
+                                            Passer la commande
+                                        </>
+                                    )}
                                 </button>
-                            </div>
 
-                            <label className="inline-flex items-center gap-2 text-xs text-[#42566f] sm:text-sm">
-                                <input type="checkbox" defaultChecked className="h-4 w-4 rounded border-[#bfc6d1]" />
-                                S&apos;abonner à la newsletter
-                            </label>
-
-                            <button type="button" onClick={handleSubmitOrder} disabled={submitting || items.length === 0}
-                                className="flex h-11 w-full items-center justify-center gap-2 rounded-xl bg-[#2ad1a4] text-sm font-bold text-[#1a3a52] shadow-md transition hover:bg-[#20b890] hover:shadow-lg disabled:cursor-not-allowed disabled:opacity-60 sm:h-12 sm:text-base">
-                                {submitting ? (
-                                    <>
-                                        <div className="h-4 w-4 animate-spin rounded-full border-2 border-[#1a3a52]/30 border-t-[#1a3a52]" />
-                                        Traitement...
-                                    </>
-                                ) : (
-                                    <>
-                                        <Lock className="h-4 w-4" />
-                                        Passer la commande
-                                    </>
-                                )}
-                            </button>
-
-                            <div className="rounded-lg border border-[#d6d8dc] p-3 text-[#1a3a52] sm:p-4">
-                                <h3 className="text-sm font-semibold sm:text-base">Avez-vous besoin d&apos;aide ?</h3>
-                                <div className="mt-3 space-y-1.5 text-xs sm:text-sm">
-                                    <p className="flex items-center gap-2"><Phone className="h-3.5 w-3.5 shrink-0" /> {SUPPORT_CONTACT.phone}</p>
-                                    <p className="flex items-center gap-2"><Mail className="h-3.5 w-3.5 shrink-0" /> {SUPPORT_CONTACT.email}</p>
+                                {/* Trust badges */}
+                                <div className="mt-4 flex items-center justify-center gap-4 text-xs text-slate-400">
+                                    <span className="flex items-center gap-1.5">
+                                        <Shield className="h-3.5 w-3.5 text-emerald-500" />
+                                        SSL 256-bit
+                                    </span>
+                                    <span className="h-3.5 w-px bg-slate-200" />
+                                    <span className="flex items-center gap-1.5">
+                                        <Lock className="h-3.5 w-3.5 text-emerald-500" />
+                                        Données protégées
+                                    </span>
                                 </div>
-                                <div className="mt-3 flex flex-wrap gap-3 text-xs text-[#667a92]">
-                                    {FOOTER_LINKS.map((link) => (
-                                        <Link key={link.label} href={link.href} className="hover:text-[#1a3a52]">{link.label}</Link>
-                                    ))}
-                                </div>
-                            </div>
 
-                            <div className="flex flex-wrap items-center gap-3 text-xs text-[#607286]">
-                                <span className="inline-flex items-center gap-1">🔒 SSL 256-bit</span>
-                                <span className="inline-flex items-center gap-1">🛡 Données protégées</span>
+                                {/* Support */}
+                                <div className="mt-5 rounded-xl border border-slate-200 bg-slate-50 p-4">
+                                    <h3 className="text-sm font-semibold text-slate-700">Besoin d&apos;aide ?</h3>
+                                    <div className="mt-3 space-y-2 text-xs text-slate-500 sm:text-sm">
+                                        <a href={`tel:${SUPPORT_CONTACT.phone}`} className="flex items-center gap-2.5 transition hover:text-slate-700">
+                                            <div className="flex h-7 w-7 items-center justify-center rounded-lg bg-white shadow-sm">
+                                                <Phone className="h-3.5 w-3.5 text-emerald-500" />
+                                            </div>
+                                            {SUPPORT_CONTACT.phone}
+                                        </a>
+                                        <a href={`mailto:${SUPPORT_CONTACT.email}`} className="flex items-center gap-2.5 transition hover:text-slate-700">
+                                            <div className="flex h-7 w-7 items-center justify-center rounded-lg bg-white shadow-sm">
+                                                <Mail className="h-3.5 w-3.5 text-emerald-500" />
+                                            </div>
+                                            {SUPPORT_CONTACT.email}
+                                        </a>
+                                    </div>
+                                    <div className="mt-3.5 flex flex-wrap gap-3">
+                                        {FOOTER_LINKS.map((link) => (
+                                            <Link key={link.label} href={link.href} className="text-xs text-slate-400 underline underline-offset-2 transition hover:text-slate-600">
+                                                {link.label}
+                                            </Link>
+                                        ))}
+                                    </div>
+                                </div>
+
                             </div>
                         </div>
                     </aside>
@@ -530,34 +666,69 @@ export default function CheckoutPage() {
     )
 }
 
-/* ── Composants ── */
+/* ── Sub-components ── */
 
-function Field({ label, type = 'text', required, placeholder, defaultValue, value, onChange }: {
-    label: string; type?: string; required?: boolean; placeholder?: string
-    defaultValue?: string; value?: string; onChange?: (value: string) => void
+function Field({ label, type = 'text', required, placeholder, value, onChange }: {
+    label: string
+    type?: string
+    required?: boolean
+    placeholder?: string
+    value?: string
+    onChange?: (value: string) => void
 }) {
     return (
         <label className="block">
-            <span className="mb-1 block text-xs font-medium text-[#37495f] sm:mb-1.5 sm:text-sm">
-                {label}{required && <span className="ml-0.5 text-red-500">*</span>}
+            <span className="mb-1.5 block text-xs font-semibold uppercase tracking-wide text-slate-500">
+                {label}{required && <span className="ml-0.5 text-rose-500">*</span>}
             </span>
-            <input type={type} placeholder={placeholder} defaultValue={defaultValue} value={value}
+            <input
+                type={type}
+                placeholder={placeholder}
+                value={value}
                 onChange={(e) => onChange?.(e.target.value)}
-                className="h-10 w-full rounded-lg border border-[#bfc6d1] bg-white px-3 text-sm text-[#1a3a52] outline-none transition focus:border-[#2ad1a4] focus:ring-2 focus:ring-[#2ad1a4]/20 sm:h-11" />
+                className="h-11 w-full rounded-xl border border-slate-200 bg-slate-50 px-4 text-sm text-slate-800 outline-none transition placeholder:text-slate-400 focus:border-emerald-400 focus:bg-white focus:ring-2 focus:ring-emerald-400/20 sm:h-12"
+            />
         </label>
     )
 }
 
-function StepBadge({ number, label, done, active, href }: { number: number; label: string; done?: boolean; active?: boolean; href?: string }) {
+function StepBadge({ number, label, done, active, href }: {
+    number: number
+    label: string
+    done?: boolean
+    active?: boolean
+    href?: string
+}) {
     const inner = (
-        <div className={`flex items-center gap-1.5 text-xs font-semibold sm:gap-2 sm:text-sm ${active ? 'text-[#2ad1a4]' : done ? 'text-white/80' : 'text-white/40'}`}>
-            <div className={`flex h-6 w-6 items-center justify-center rounded-full text-[10px] font-bold sm:h-7 sm:w-7 sm:text-xs ${active ? 'bg-[#2ad1a4] text-[#1a3a52]' : done ? 'bg-white/20 text-white' : 'bg-white/10 text-white/40'}`}>
-                {done ? '✓' : number}
+        <div className={`flex items-center gap-2 text-xs font-semibold sm:text-sm ${active ? 'text-emerald-400' : done ? 'text-white/70' : 'text-white/30'}`}>
+            <div className={`flex h-7 w-7 items-center justify-center rounded-full text-xs font-bold transition ${active ? 'bg-emerald-400 text-[#0f2537] shadow-md shadow-emerald-500/30' : done ? 'bg-white/20 text-white' : 'bg-white/10 text-white/30'}`}>
+                {done ? <CheckCircle2 className="h-4 w-4" /> : number}
             </div>
             <span className="hidden xs:inline sm:inline">{label}</span>
         </div>
     )
     return href ? <Link href={href}>{inner}</Link> : inner
+}
+
+function MenuLink({ href, icon, children, onClick, badge }: {
+    href: string
+    icon: React.ReactNode
+    children: React.ReactNode
+    onClick?: () => void
+    badge?: number
+}) {
+    return (
+        <Link href={href} onClick={onClick}
+            className="flex items-center gap-3 px-4 py-2.5 text-sm font-medium text-slate-600 transition hover:bg-slate-50 hover:text-slate-900">
+            <span className="text-slate-400">{icon}</span>
+            <span className="flex-1">{children}</span>
+            {badge && badge > 0 ? (
+                <span className="flex h-5 min-w-5 items-center justify-center rounded-full bg-rose-100 px-1 text-[10px] font-bold text-rose-600">
+                    {badge}
+                </span>
+            ) : null}
+        </Link>
+    )
 }
 
 const paymentIcons: Record<string, React.ReactNode> = {
@@ -569,48 +740,4 @@ const paymentIcons: Record<string, React.ReactNode> = {
     paypal: (<svg viewBox="0 0 40 24" className="h-5 w-9 sm:h-6 sm:w-10" fill="none"><rect width="40" height="24" rx="4" fill="#003087" /><text x="4" y="16" fontSize="8" fill="white" fontWeight="bold">PayPal</text></svg>),
     bank: (<svg viewBox="0 0 40 24" className="h-5 w-9 sm:h-6 sm:w-10" fill="none"><rect width="40" height="24" rx="4" fill="#f0f4f8" stroke="#d0d9e3" strokeWidth="1" /><path d="M8 16V10M14 16V10M20 16V10M26 16V10M32 16V10M6 10L20 5L34 10H6zM6 17H34" stroke="#1a3a52" strokeWidth="1.5" strokeLinecap="round" /></svg>),
     chorus: (<svg viewBox="0 0 40 24" className="h-5 w-9 sm:h-6 sm:w-10" fill="none"><rect width="40" height="24" rx="4" fill="#003189" /><text x="3" y="16" fontSize="7" fill="white" fontWeight="bold">CHORUS</text></svg>),
-}
-
-function AccordionSection({ id, title, open, onToggle, children, summary }: {
-    id: string; title: string; open: boolean; onToggle: () => void
-    children: React.ReactNode; summary?: string
-}) {
-    return (
-        <div className="overflow-hidden rounded-xl border border-[#d6d8dc] bg-white">
-            <button type="button" onClick={onToggle} className="flex w-full items-center justify-between bg-[#1a3a52] px-4 py-3 text-left transition hover:bg-[#1f4570] sm:px-5 sm:py-4">
-                <span className="text-sm font-bold text-white sm:text-base">{title}</span>
-                <div className="flex items-center gap-2">
-                    {!open && summary && <span className="hidden text-xs text-white/60 sm:inline">{summary}</span>}
-                    <svg className={`h-4 w-4 text-white/70 transition-transform duration-200 sm:h-5 sm:w-5 ${open ? 'rotate-180' : ''}`} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                        <path strokeLinecap="round" strokeLinejoin="round" d="M19 9l-7 7-7-7" />
-                    </svg>
-                </div>
-            </button>
-            {open && <div className="p-4 sm:p-5">{children}</div>}
-        </div>
-    )
-}
-
-function ChoiceBlockInline({ title, choices, value, onChange }: {
-    title: string
-    choices: Array<{ id: string; labelLeft?: string; labelMain: string; labelRight?: string; icon?: React.ReactNode }>
-    value: string
-    onChange: (next: string) => void
-}) {
-    return (
-        <div>
-            {choices.map((choice) => {
-                const selected = value === choice.id
-                return (
-                    <label key={choice.id} className={`flex cursor-pointer items-center gap-2 border-b border-[#e2e7ed] py-3 text-sm last:border-0 sm:gap-4 sm:py-4 ${selected ? 'bg-[#f0fdf9]' : ''}`}>
-                        <input type="radio" name={title} checked={selected} onChange={() => onChange(choice.id)} className="h-4 w-4 shrink-0 accent-[#2ad1a4]" />
-                        {choice.icon && <span className="shrink-0">{choice.icon}</span>}
-                        {choice.labelLeft && <span className="w-20 shrink-0 text-xs font-semibold text-[#273f59] sm:w-28 sm:text-sm">{choice.labelLeft}</span>}
-                        <span className="min-w-0 flex-1 text-xs font-medium text-[#1a3a52] sm:text-sm">{choice.labelMain}</span>
-                        {choice.labelRight && <span className="hidden text-xs text-[#4a6179] sm:inline">{choice.labelRight}</span>}
-                    </label>
-                )
-            })}
-        </div>
-    )
 }

@@ -1,3 +1,4 @@
+// /app/api/auth/refresh/route.ts
 import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/prisma'
 import { verifyRefreshToken, signAccessToken, signRefreshToken } from '@/lib/jwt'
@@ -16,6 +17,21 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: 'Token révoqué ou expiré' }, { status: 401 })
     }
 
+    // ── Vérification isActive de l'utilisateur ───────────────────────────────
+    const user = await prisma.user.findUnique({
+      where: { id: payload.userId },
+      select: { isActive: true },
+    })
+    if (!user || !user.isActive) {
+      // Révoquer le token en base pour couper proprement la session
+      await prisma.refreshToken.update({
+        where: { id: stored.id },
+        data: { isRevoked: true },
+      })
+      return NextResponse.json({ error: 'Compte désactivé' }, { status: 403 })
+    }
+    // ─────────────────────────────────────────────────────────────────────────
+
     // Révoquer l'ancien et créer un nouveau (rotation)
     await prisma.refreshToken.update({ where: { id: stored.id }, data: { isRevoked: true } })
 
@@ -25,19 +41,24 @@ export async function POST(req: NextRequest) {
 
     await prisma.refreshToken.create({
       data: {
-        token: newRefreshToken, userId: payload.userId,
-        expiresAt: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000)
-      }
+        token: newRefreshToken,
+        userId: payload.userId,
+        expiresAt: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000),
+      },
     })
 
     const response = NextResponse.json({ success: true })
     response.cookies.set('access_token', newAccessToken, {
-      httpOnly: true, secure: process.env.NODE_ENV === 'production',
-      sameSite: 'lax', maxAge: 60 * 60
+      httpOnly: true,
+      secure: process.env.NODE_ENV === 'production',
+      sameSite: 'lax',
+      maxAge: 60 * 60,
     })
     response.cookies.set('refresh_token', newRefreshToken, {
-      httpOnly: true, secure: process.env.NODE_ENV === 'production',
-      sameSite: 'lax', maxAge: 7 * 24 * 60 * 60
+      httpOnly: true,
+      secure: process.env.NODE_ENV === 'production',
+      sameSite: 'lax',
+      maxAge: 7 * 24 * 60 * 60,
     })
     return response
   } catch {
