@@ -1,10 +1,11 @@
 'use client'
 
-import { useEffect, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import {
   Search, Plus, X, ChevronDown, ChevronUp,
   Clock, CheckCircle, AlertCircle, Wrench, XCircle,
   User, Building2, FileText, Calendar, Send,
+  Sparkles, ChevronLeft, ChevronRight, Package, SlidersHorizontal,
 } from 'lucide-react'
 import { toast } from 'sonner'
 import { Badge } from '@/components/ui/badge'
@@ -14,7 +15,7 @@ import { Input } from '@/components/ui/input'
 
 // ── Types ──────────────────────────────────────────────────────
 type TicketStatus = 'OPEN' | 'ACCEPTED' | 'IN_PROGRESS' | 'RESOLVED' | 'CLOSED'
-type TicketPriority = 'LOW' | 'MEDIUM' | 'HIGH'
+type TicketPriority = 'LOW' | 'MEDIUM' | 'HIGH' | 'URGENT'
 
 interface TicketUser { id: string; firstName: string; lastName: string; email: string; companyName?: string }
 interface Employee { id: string; firstName: string; lastName: string; departement?: string }
@@ -22,13 +23,36 @@ interface TicketComment {
   id: string; content: string; createdAt: string
   author: { id: string; firstName: string; lastName: string; userRole: string }
 }
+
+// ─── Options de configuration d'un produit configurable (même forme que
+// sur les pages commandes/contrats) ───────────────────────────────────────
+interface SelectedOption {
+  id?: string | number
+  optionName: string
+  valueName: string
+  groupName?: string | null
+  price?: number | string
+}
+
+// ─── Produit couvert par le contrat lié au ticket ────────────────────────
+interface ContractItem {
+  id: string; name: string; quantity: number
+  product?: { name: string; type?: 'STANDARD' | 'CONFIGURABLE' }
+  // Présent uniquement si le produit est CONFIGURABLE et que l'API /api/admin/tickets le fournit
+  selectedOptions?: SelectedOption[]
+}
+
 interface Ticket {
   id: string; title: string; description: string
   status: TicketStatus; priority: TicketPriority
   createdAt: string; updatedAt: string
   user: TicketUser
   assignedTo?: Employee | null
-  contract?: { id: string; companyName: string; warrantyEnd: string } | null
+  contract?: {
+    id: string; companyName: string; warrantyEnd: string
+    // Présent uniquement si l'API renvoie le détail des produits du contrat
+    contractItems?: ContractItem[]
+  } | null
   comments: TicketComment[]
 }
 
@@ -45,10 +69,98 @@ const PRIORITY_CONFIG: Record<TicketPriority, { label: string; color: string }> 
   LOW:    { label: 'Faible',  color: 'text-slate-500' },
   MEDIUM: { label: 'Moyen',   color: 'text-amber-600' },
   HIGH:   { label: 'Élevée',  color: 'text-red-600' },
+  URGENT: { label: 'Urgente', color: 'text-red-700 font-bold' },
 }
+
+const TICKETS_PER_PAGE = 6
+// Un ticket est considéré "nouveau" s'il a été créé il y a moins de 24h.
+// (Il n'existe pas encore de champ "vu / non vu" côté backend — à défaut,
+// on se base sur la fraîcheur de création.)
+const NEW_TICKET_WINDOW_MS = 24 * 60 * 60 * 1000
 
 function formatDate(s: string) {
   return new Date(s).toLocaleDateString('fr-FR', { day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' })
+}
+function formatCurrency(v: number | string) {
+  return Number(v).toLocaleString('fr-FR', { style: 'currency', currency: 'EUR' })
+}
+function isRecentTicket(createdAt: string) {
+  return Date.now() - new Date(createdAt).getTime() < NEW_TICKET_WINDOW_MS
+}
+
+// ─── Regroupe les options par groupName pour un affichage plus clair ─────────
+function groupSelectedOptions(options: SelectedOption[]) {
+  const map = new Map<string, SelectedOption[]>()
+  const order: string[] = []
+  for (const opt of options) {
+    const key = opt.groupName?.trim() || opt.optionName
+    if (!map.has(key)) {
+      order.push(key)
+      map.set(key, [])
+    }
+    map.get(key)!.push(opt)
+  }
+  return order.map((key) => ({ groupLabel: key, items: map.get(key)! }))
+}
+
+// ─── Aperçu des produits couverts par le contrat lié au ticket ───────────────
+// Standard → affichage simple. Configurable → options groupées, comme sur
+// les pages commandes/contrats.
+function TicketContractProducts({ items }: { items: ContractItem[] }) {
+  return (
+    <div className="space-y-2">
+      {items.map((item) => {
+        const isConfigurable = item.product?.type === 'CONFIGURABLE'
+        const options = item.selectedOptions ?? []
+        const grouped = groupSelectedOptions(options)
+
+        return (
+          <div key={item.id} className="overflow-hidden rounded-lg border border-slate-200 bg-white">
+            <div className="flex items-center gap-2 p-2">
+              <Package className="h-3.5 w-3.5 shrink-0 text-slate-400" />
+              <p className="min-w-0 flex-1 truncate text-xs font-semibold text-slate-900">
+                {item.product?.name ?? item.name}
+              </p>
+              {isConfigurable ? (
+                <span className="inline-flex shrink-0 items-center gap-1 rounded-full bg-purple-50 px-1.5 py-0.5 text-[9px] font-semibold text-purple-700">
+                  <SlidersHorizontal className="h-2.5 w-2.5" /> Configuré
+                </span>
+              ) : (
+                <span className="inline-flex shrink-0 items-center rounded-full bg-slate-100 px-1.5 py-0.5 text-[9px] font-semibold text-slate-500">
+                  Standard
+                </span>
+              )}
+              <span className="shrink-0 text-[10px] text-slate-400">×{item.quantity}</span>
+            </div>
+
+            {isConfigurable && options.length > 0 && (
+              <div className="space-y-1.5 border-t border-slate-100 bg-slate-50/70 px-2 py-1.5">
+                {grouped.map(({ groupLabel, items: groupItems }) => (
+                  <div key={groupLabel} className="rounded-md border border-slate-200 bg-white px-2 py-1">
+                    <p className="mb-0.5 text-[9px] font-bold uppercase tracking-wide text-slate-400">{groupLabel}</p>
+                    <div className="flex flex-wrap gap-1">
+                      {groupItems.map((opt, idx) => (
+                        <span
+                          key={opt.id ?? `${opt.optionName}-${idx}`}
+                          className="inline-flex items-center gap-1 rounded-full bg-slate-100 px-2 py-0.5 text-[10px] font-medium text-slate-700"
+                        >
+                          <span className="h-1 w-1 rounded-full bg-[#2ad1a4]" />
+                          {opt.valueName}
+                          {Number(opt.price) > 0 && (
+                            <span className="text-[#0f6e56]">+{formatCurrency(opt.price!)}</span>
+                          )}
+                        </span>
+                      ))}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        )
+      })}
+    </div>
+  )
 }
 
 // ── Composant carte ticket ─────────────────────────────────────
@@ -67,6 +179,7 @@ function TicketCard({
   const [assignedToId, setAssignedToId] = useState(ticket.assignedTo?.id ?? '')
   const sc = STATUS_CONFIG[ticket.status]
   const pc = PRIORITY_CONFIG[ticket.priority]
+  const isNew = isRecentTicket(ticket.createdAt)
 
   const NEXT_STATUSES: Record<TicketStatus, TicketStatus[]> = {
     OPEN:        ['ACCEPTED', 'CLOSED'],
@@ -104,12 +217,17 @@ function TicketCard({
   }
 
   return (
-    <Card className="border-slate-200 bg-white shadow-sm transition hover:shadow-md">
+    <Card className={`bg-white shadow-sm transition hover:shadow-md ${isNew ? 'border-emerald-300 ring-2 ring-emerald-200' : 'border-slate-200'}`}>
       <CardHeader className="pb-2">
         <div className="flex flex-wrap items-start justify-between gap-2">
           <div className="min-w-0 flex-1">
-            <div className="flex flex-wrap items-center gap-2">
+            <div className="flex flex-wrap items-center gap-1.5 sm:gap-2">
               <CardTitle className="text-sm font-bold text-slate-900 sm:text-base">{ticket.title}</CardTitle>
+              {isNew && (
+                <span className="inline-flex items-center gap-1 rounded-full border border-emerald-200 bg-emerald-50 px-2 py-0.5 text-[10px] font-semibold text-emerald-700">
+                  <Sparkles className="h-3 w-3" /> Nouveau
+                </span>
+              )}
               <span className={`inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-[10px] font-semibold ${sc.bg} ${sc.color}`}>
                 {sc.icon}{sc.label}
               </span>
@@ -124,12 +242,19 @@ function TicketCard({
       </CardHeader>
 
       <CardContent className="space-y-3">
-        <p className="text-sm text-slate-600 line-clamp-2">{ticket.description}</p>
+        <p className="text-sm text-slate-600 line-clamp-2 sm:line-clamp-3">{ticket.description}</p>
 
         {ticket.contract && (
-          <div className="flex items-center gap-2 rounded-lg bg-emerald-50 px-3 py-2 text-xs text-emerald-700">
-            <FileText className="h-3.5 w-3.5 shrink-0" />
-            Contrat : {ticket.contract.companyName} — Garantie jusqu'au {new Date(ticket.contract.warrantyEnd).toLocaleDateString('fr-FR')}
+          <div className="space-y-2 rounded-lg bg-emerald-50 px-3 py-2 text-xs text-emerald-700">
+            <div className="flex flex-wrap items-center gap-1.5">
+              <FileText className="h-3.5 w-3.5 shrink-0" />
+              <span className="min-w-0 break-words">
+                Contrat : {ticket.contract.companyName} — Garantie jusqu'au {new Date(ticket.contract.warrantyEnd).toLocaleDateString('fr-FR')}
+              </span>
+            </div>
+            {ticket.contract.contractItems && ticket.contract.contractItems.length > 0 && (
+              <TicketContractProducts items={ticket.contract.contractItems} />
+            )}
           </div>
         )}
 
@@ -171,7 +296,7 @@ function TicketCard({
                 <select
                   value={assignedToId}
                   onChange={(e) => setAssignedToId(e.target.value)}
-                  className="h-9 flex-1 rounded-lg border border-slate-200 bg-white px-2 text-sm text-slate-700 outline-none focus:border-sky-400"
+                  className="h-9 w-full flex-1 rounded-lg border border-slate-200 bg-white px-2 text-sm text-slate-700 outline-none focus:border-sky-400 sm:w-auto"
                 >
                   <option value="">— Non assigné —</option>
                   {employees.map((emp) => (
@@ -184,7 +309,7 @@ function TicketCard({
                   size="sm"
                   onClick={() => handleUpdate()}
                   disabled={updating}
-                  className="bg-sky-600 text-white hover:bg-sky-700"
+                  className="w-full bg-sky-600 text-white hover:bg-sky-700 sm:w-auto"
                 >
                   Assigner
                 </Button>
@@ -204,7 +329,7 @@ function TicketCard({
                 <div className="max-h-40 space-y-2 overflow-y-auto">
                   {ticket.comments.map((c) => (
                     <div key={c.id} className="rounded-lg border border-slate-200 bg-white p-2.5">
-                      <div className="flex items-center justify-between gap-2">
+                      <div className="flex flex-wrap items-center justify-between gap-1.5">
                         <span className="text-xs font-semibold text-slate-700">
                           {c.author.firstName} {c.author.lastName}
                           <Badge className="ml-1.5 text-[10px]">{c.author.userRole}</Badge>
@@ -233,7 +358,7 @@ function TicketCard({
                   size="sm"
                   onClick={() => handleUpdate()}
                   disabled={!comment.trim() || updating}
-                  className="bg-sky-600 text-white hover:bg-sky-700"
+                  className="w-full bg-sky-600 text-white hover:bg-sky-700 sm:w-auto"
                 >
                   <Send className="h-3.5 w-3.5" />
                 </Button>
@@ -246,6 +371,71 @@ function TicketCard({
   )
 }
 
+// ─── Pagination ───────────────────────────────────────────────
+function TicketsPagination({
+  currentPage, totalPages, totalItems, itemsPerPage, onPageChange,
+}: {
+  currentPage: number; totalPages: number; totalItems: number; itemsPerPage: number
+  onPageChange: (page: number) => void
+}) {
+  const pageNumbers = useMemo(() => {
+    const pages: (number | 'ellipsis')[] = []
+    const delta = 1
+    for (let i = 1; i <= totalPages; i++) {
+      if (i === 1 || i === totalPages || (i >= currentPage - delta && i <= currentPage + delta)) {
+        pages.push(i)
+      } else if (pages[pages.length - 1] !== 'ellipsis') {
+        pages.push('ellipsis')
+      }
+    }
+    return pages
+  }, [currentPage, totalPages])
+
+  if (totalPages <= 1) return null
+
+  return (
+    <div className="flex flex-col items-center justify-between gap-3 rounded-xl border border-slate-200 bg-white px-4 py-3 shadow-sm sm:flex-row">
+      <p className="text-xs text-slate-500">
+        Affichage {(currentPage - 1) * itemsPerPage + 1}
+        –{Math.min(currentPage * itemsPerPage, totalItems)} sur {totalItems}
+      </p>
+      <div className="flex items-center gap-1">
+        <button
+          onClick={() => onPageChange(currentPage - 1)}
+          disabled={currentPage === 1}
+          className="inline-flex h-8 w-8 items-center justify-center rounded-md border border-slate-200 text-slate-600 transition hover:bg-slate-50 disabled:opacity-40 disabled:hover:bg-transparent"
+        >
+          <ChevronLeft className="h-4 w-4" />
+        </button>
+        <div className="flex items-center gap-1">
+          {pageNumbers.map((p, idx) =>
+            p === 'ellipsis' ? (
+              <span key={`ellipsis-${idx}`} className="px-1.5 text-xs text-slate-400">…</span>
+            ) : (
+              <button
+                key={p}
+                onClick={() => onPageChange(p)}
+                className={`h-8 min-w-[2rem] rounded-md px-2 text-xs font-semibold transition ${
+                  p === currentPage ? 'bg-sky-600 text-white shadow-sm' : 'text-slate-600 hover:bg-slate-100'
+                }`}
+              >
+                {p}
+              </button>
+            )
+          )}
+        </div>
+        <button
+          onClick={() => onPageChange(currentPage + 1)}
+          disabled={currentPage === totalPages}
+          className="inline-flex h-8 w-8 items-center justify-center rounded-md border border-slate-200 text-slate-600 transition hover:bg-slate-50 disabled:opacity-40 disabled:hover:bg-transparent"
+        >
+          <ChevronRight className="h-4 w-4" />
+        </button>
+      </div>
+    </div>
+  )
+}
+
 // ── Page principale ────────────────────────────────────────────
 export default function AdminTicketsPage() {
   const [tickets, setTickets] = useState<Ticket[]>([])
@@ -253,6 +443,7 @@ export default function AdminTicketsPage() {
   const [loading, setLoading] = useState(true)
   const [search, setSearch] = useState('')
   const [filterStatus, setFilterStatus] = useState<TicketStatus | 'ALL'>('ALL')
+  const [currentPage, setCurrentPage] = useState(1)
 
   useEffect(() => {
     const controller = new AbortController()
@@ -288,6 +479,18 @@ export default function AdminTicketsPage() {
       )
     })
 
+  // Revenir à la page 1 dès que le filtre ou la recherche change
+  useEffect(() => {
+    setCurrentPage(1)
+  }, [filterStatus, search])
+
+  const totalPages = Math.max(1, Math.ceil(filtered.length / TICKETS_PER_PAGE))
+  const safePage = Math.min(currentPage, totalPages)
+  const paginated = filtered.slice(
+    (safePage - 1) * TICKETS_PER_PAGE,
+    safePage * TICKETS_PER_PAGE
+  )
+
   const counts = {
     ALL: tickets.length,
     OPEN: tickets.filter(t => t.status === 'OPEN').length,
@@ -304,7 +507,7 @@ export default function AdminTicketsPage() {
   )
 
   return (
-    <div className="mx-auto w-full max-w-5xl space-y-5">
+    <div className="mx-auto w-full max-w-5xl space-y-5 px-3 sm:px-0">
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div>
           <h1 className="text-xl font-black text-slate-900 sm:text-2xl">Gestion des tickets</h1>
@@ -324,7 +527,7 @@ export default function AdminTicketsPage() {
       </div>
 
       {/* Filtres */}
-      <div className="flex flex-wrap gap-2">
+      <div className="-mx-3 flex gap-2 overflow-x-auto px-3 pb-1 sm:mx-0 sm:flex-wrap sm:overflow-visible sm:px-0">
         {([
           ['ALL', 'Tous'],
           ['OPEN', 'Ouverts'],
@@ -336,7 +539,7 @@ export default function AdminTicketsPage() {
           <button
             key={key}
             onClick={() => setFilterStatus(key)}
-            className={`inline-flex items-center gap-1.5 rounded-full px-3 py-1.5 text-xs font-semibold transition ${
+            className={`inline-flex shrink-0 items-center gap-1.5 rounded-full px-3 py-1.5 text-xs font-semibold transition ${
               filterStatus === key ? 'bg-sky-600 text-white shadow-sm' : 'bg-white text-slate-600 shadow-sm ring-1 ring-slate-200 hover:bg-slate-50'
             }`}
           >
@@ -355,11 +558,21 @@ export default function AdminTicketsPage() {
           <p className="mt-3 font-semibold text-slate-700">Aucun ticket trouvé</p>
         </div>
       ) : (
-        <div className="space-y-3">
-          {filtered.map(ticket => (
-            <TicketCard key={ticket.id} ticket={ticket} employees={employees} onUpdated={handleUpdated} />
-          ))}
-        </div>
+        <>
+          <div className="space-y-3">
+            {paginated.map(ticket => (
+              <TicketCard key={ticket.id} ticket={ticket} employees={employees} onUpdated={handleUpdated} />
+            ))}
+          </div>
+
+          <TicketsPagination
+            currentPage={safePage}
+            totalPages={totalPages}
+            totalItems={filtered.length}
+            itemsPerPage={TICKETS_PER_PAGE}
+            onPageChange={setCurrentPage}
+          />
+        </>
       )}
     </div>
   )

@@ -27,7 +27,17 @@ export async function GET(req: NextRequest) {
           shippingAddress: true,
           items: {
             include: {
-              product: { select: { name: true, image_url: true } },
+              product: { select: { name: true, image_url: true, type: true } },
+              selectedOptions: {
+                include: {
+                  configurationValue: {
+                    include: {
+                      configuration_option: { select: { name: true } },
+                      standard_product: { select: { name: true } },
+                    },
+                  },
+                },
+              },
             },
           },
         },
@@ -38,7 +48,30 @@ export async function GET(req: NextRequest) {
       prisma.order.count({ where }),
     ])
 
-    return NextResponse.json({ orders, total, page, limit })
+    // ─── Formatage : même transformation que /api/orders pour que le front reçoive
+    // optionName / valueName / groupName / price exploitables ───────────────────
+    const formattedOrders = orders.map((order) => ({
+      ...order,
+      items: order.items.map((item) => ({
+        ...item,
+        product: item.product
+          ? { name: item.product.name, image_url: item.product.image_url, type: item.product.type }
+          : undefined,
+        selectedOptions: item.selectedOptions.map((so) => ({
+          id: so.id,
+          // FIX : configurationValueId + quantity conservés pour permettre de relier
+          // ces options ailleurs (ex: création de contrat de garantie à partir d'une commande)
+          configurationValueId: so.configurationValueId,
+          quantity: so.quantity,
+          optionName: so.configurationValue.configuration_option.name,
+          valueName: so.configurationValue.standard_product.name,
+          groupName: so.configurationValue.group_name,
+          price: so.configurationValue.price,
+        })),
+      })),
+    }))
+
+    return NextResponse.json({ orders: formattedOrders, total, page, limit })
   } catch {
     return NextResponse.json({ error: 'Erreur serveur' }, { status: 500 })
   }

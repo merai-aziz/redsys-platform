@@ -32,18 +32,64 @@ export async function GET(req: NextRequest) {
           },
         },
         contractItems: {
-          include: { product: { select: { name: true } } },
+          include: {
+            product: { select: { name: true, image_url: true, type: true } },
+            selectedOptions: {
+              include: {
+                configurationValue: {
+                  include: {
+                    configuration_option: { select: { name: true } },
+                    standard_product: { select: { name: true } },
+                  },
+                },
+              },
+            },
+          },
         },
         tickets: { select: { id: true, status: true } },
       },
       orderBy: { createdAt: 'desc' },
     })
 
-    return NextResponse.json({ contracts })
+    // ─── Formatage : même transformation que /api/orders et /api/admin/orders,
+    // pour que le front reçoive optionName / valueName / groupName / price ─────
+    const formattedContracts = contracts.map((contract) => ({
+      ...contract,
+      contractItems: contract.contractItems.map((item) => ({
+        ...item,
+        product: item.product
+          ? { name: item.product.name, image_url: item.product.image_url, type: item.product.type }
+          : undefined,
+        selectedOptions: item.selectedOptions.map((so) => ({
+          id: so.id,
+          configurationValueId: so.configurationValueId,
+          optionName: so.configurationValue.configuration_option.name,
+          valueName: so.configurationValue.standard_product.name,
+          groupName: so.configurationValue.group_name,
+          price: so.configurationValue.price,
+        })),
+      })),
+    }))
+
+    return NextResponse.json({ contracts: formattedContracts })
   } catch (err) {
     if (err instanceof Response) return err
     return NextResponse.json({ error: 'Erreur serveur' }, { status: 500 })
   }
+}
+
+// ─── Types du payload entrant ───────────────────────────────────────────────
+type IncomingSelectedOption = {
+  configurationValueId?: number
+  quantity?: number
+}
+
+type IncomingContractItem = {
+  productId?: number
+  name: string
+  description?: string
+  quantity?: number
+  selectedOptions?: IncomingSelectedOption[]
 }
 
 // POST — créer un contrat
@@ -88,6 +134,8 @@ export async function POST(req: NextRequest) {
     const end = new Date(start)
     end.setMonth(end.getMonth() + months)
 
+    const rawItems = (items ?? []) as IncomingContractItem[]
+
     const contract = await prisma.$transaction(async (tx) => {
       const newContract = await tx.contract.create({
         data: {
@@ -103,17 +151,46 @@ export async function POST(req: NextRequest) {
           warrantyMonths: months,
           warrantyStart: start,
           warrantyEnd: end,
-          contractItems: items?.length > 0 ? {
-            create: items.map((item: { productId?: number; name: string; description?: string; quantity?: number }) => ({
-              productId: item.productId ?? null,
-              name: item.name,
-              description: item.description ?? null,
-              quantity: item.quantity ?? 1,
-            })),
+          contractItems: rawItems.length > 0 ? {
+            create: rawItems.map((item) => {
+              const validOptions = (item.selectedOptions ?? []).filter(
+                (o): o is Required<Pick<IncomingSelectedOption, 'configurationValueId'>> & IncomingSelectedOption =>
+                  typeof o.configurationValueId === 'number',
+              )
+
+              return {
+                productId: item.productId ?? null,
+                name: item.name,
+                description: item.description ?? null,
+                quantity: item.quantity ?? 1,
+                ...(validOptions.length > 0 ? {
+                  selectedOptions: {
+                    create: validOptions.map((o) => ({
+                      configurationValueId: o.configurationValueId!,
+                      quantity: Math.max(1, Math.floor(o.quantity ?? 1)),
+                    })),
+                  },
+                } : {}),
+              }
+            }),
           } : undefined,
         },
         include: {
-          contractItems: true,
+          contractItems: {
+            include: {
+              product: { select: { name: true, image_url: true, type: true } },
+              selectedOptions: {
+                include: {
+                  configurationValue: {
+                    include: {
+                      configuration_option: { select: { name: true } },
+                      standard_product: { select: { name: true } },
+                    },
+                  },
+                },
+              },
+            },
+          },
           user: { select: { id: true, firstName: true, lastName: true, email: true } },
         },
       })
@@ -133,7 +210,27 @@ export async function POST(req: NextRequest) {
       return newContract
     })
 
-    return NextResponse.json({ contract }, { status: 201 })
+    // ─── Formatage identique au GET, pour que le front puisse afficher
+    // directement les options du contrat fraîchement créé ──────────────────────
+    const formattedContract = {
+      ...contract,
+      contractItems: contract.contractItems.map((item) => ({
+        ...item,
+        product: item.product
+          ? { name: item.product.name, image_url: item.product.image_url, type: item.product.type }
+          : undefined,
+        selectedOptions: item.selectedOptions.map((so) => ({
+          id: so.id,
+          configurationValueId: so.configurationValueId,
+          optionName: so.configurationValue.configuration_option.name,
+          valueName: so.configurationValue.standard_product.name,
+          groupName: so.configurationValue.group_name,
+          price: so.configurationValue.price,
+        })),
+      })),
+    }
+
+    return NextResponse.json({ contract: formattedContract }, { status: 201 })
   } catch (err) {
     if (err instanceof Response) return err
     console.error('POST /api/admin/contracts error:', err)

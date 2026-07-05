@@ -4,7 +4,7 @@ import Image from 'next/image'
 import Link from 'next/link'
 import { useEffect, useRef, useState } from 'react'
 import { useRouter } from 'next/navigation'
-import { Package, ShoppingCart, Trash2, Minus, Plus } from 'lucide-react'
+import { Package, ShoppingCart, Trash2, Minus, Plus, AlertTriangle } from 'lucide-react'
 
 import { SiteHeader } from '@/components/SiteHeader'
 import { useAuth } from '@/context/AuthContext'
@@ -87,10 +87,6 @@ function formatCurrency(value: number) {
   return value.toLocaleString('fr-FR', { style: 'currency', currency: 'EUR' })
 }
 
-function getBrandName(catalog: CatalogPayload, brandId: string, fallback?: string) {
-  return catalog.brands.find((brand) => brand.id === brandId)?.name ?? fallback ?? ''
-}
-
 function getSectionFromDomainId(catalog: CatalogPayload, domainId: string | null) {
   if (!domainId || domainId === 'domain-products') return 'products'
 
@@ -104,10 +100,59 @@ function getSectionFromDomainId(catalog: CatalogPayload, domainId: string | null
   return 'products'
 }
 
+// --- Vérification de stock -------------------------------------------------
+
+interface StockStatus {
+  inStock: boolean
+  label: string | null
+}
+
+function getModelStockStatus(catalog: CatalogPayload, modelId: string | null | undefined): StockStatus {
+  if (!modelId) return { inStock: true, label: null }
+
+  const model = catalog.models.find((m) => m.id === modelId)
+  if (!model) return { inStock: true, label: null } // pas de donnée = pas de faux positif
+
+  if (model.status === 'OUT_OF_STOCK' || (typeof model.stockQty === 'number' && model.stockQty <= 0)) {
+    return { inStock: false, label: `${model.name} est en rupture de stock` }
+  }
+
+  if (model.status === 'DISCONTINUED') {
+    return { inStock: false, label: `${model.name} n'est plus disponible` }
+  }
+
+  return { inStock: true, label: null }
+}
+
+// Best-effort : /api/catalog n'expose pas le stock des configurationValue.standard_product.
+// On tente une correspondance par optionId au cas où ce produit apparaîtrait aussi dans catalog.models.
+// Si rien n'est trouvé, on n'affiche AUCUN message (pour ne jamais afficher une fausse rupture).
+function getOptionStockStatus(catalog: CatalogPayload, option: { label: string; optionId?: number }): StockStatus {
+  if (option.optionId == null) return { inStock: true, label: null }
+
+  const model = catalog.models.find((m) => m.id === String(option.optionId))
+  if (!model) return { inStock: true, label: null }
+
+  if (model.status === 'OUT_OF_STOCK' || (typeof model.stockQty === 'number' && model.stockQty <= 0)) {
+    return { inStock: false, label: `${option.label} est en rupture de stock` }
+  }
+
+  return { inStock: true, label: null }
+}
+
 export default function CartPage() {
   const router = useRouter()
   const { isAuthenticated } = useAuth()
-  const { items, removeItem, updateQuantity, clearCart, totalItems, totalPrice } = useCart()
+  const {
+    items,
+    removeItem,
+    updateQuantity,
+    updateOptionQty,
+    removeOption,
+    clearCart,
+    totalItems,
+    totalPrice,
+  } = useCart()
   const [catalog, setCatalog] = useState<CatalogPayload>({
     domains: [],
     brands: [],
@@ -137,7 +182,18 @@ export default function CartPage() {
     }
   }, [])
 
-  const cartSubtotal = totalPrice
+  // Le total du contexte ne multiplie pas les options par leur qty (bug dans CartContext.tsx,
+  // ligne `optionsTotal = ... + option.price`). On recalcule ici un total fiable pour l'affichage,
+  // en attendant la correction de ce fichier.
+  const reliableSubtotal = items.reduce((sum, item) => {
+    if (item.type === 'configurable') {
+      const optionsTotal = item.options.reduce((s, o) => s + o.price * (o.qty ?? 1), 0)
+      return sum + item.basePrice * item.quantity + optionsTotal
+    }
+    return sum + item.price * item.quantity
+  }, 0)
+
+  const cartSubtotal = reliableSubtotal
   const vatRate = 0.19
   const vatAmount = cartSubtotal * vatRate
   const grandTotal = cartSubtotal + vatAmount
@@ -265,13 +321,12 @@ export default function CartPage() {
               </div>
 
               {items.map((item) => {
-                const brandName = getBrandName(catalog, item.brandName ? catalog.brands.find((brand) => brand.name === item.brandName)?.id ?? '' : '', item.brandName)
                 const quantity = item.quantity
 
                 if (item.type === 'configurable') {
-                  const optionsTotal = item.options.reduce((sum, option) => sum + option.price, 0)
-                  const unitPrice = item.basePrice + optionsTotal
-                  const subtotal = unitPrice * quantity
+                  const mainStock = getModelStockStatus(catalog, item.modelId)
+                  const optionsTotal = item.options.reduce((sum, option) => sum + option.price * (option.qty ?? 1), 0)
+                  const subtotal = item.basePrice * quantity + optionsTotal
 
                   return (
                     <article key={`${item.type}-${item.modelId}`} className="rounded-2xl border border-[#d0d9e3] bg-white p-5 shadow-sm">
@@ -292,15 +347,71 @@ export default function CartPage() {
                             <p className="mt-1 text-sm text-[#5a7a9a]">{item.brandName}</p>
                           </div>
 
+                          {!mainStock.inStock && (
+                            <div className="flex items-center gap-2 rounded-xl bg-red-50 px-3 py-2 text-sm font-semibold text-red-600">
+                              <AlertTriangle className="h-4 w-4 flex-shrink-0" />
+                              <span>{mainStock.label}</span>
+                            </div>
+                          )}
+
                           <div className="rounded-xl bg-[#f8fafc] p-3 text-sm text-[#334e68]">
                             <p className="font-semibold text-[#1a3a52]">Options</p>
-                            <ul className="mt-2 space-y-1">
-                              {item.options.map((option) => (
-                                <li key={`${item.modelId}-${option.label}`} className="flex items-center justify-between gap-3">
-                                  <span>{option.label}</span>
-                                  <span className="font-medium">{formatCurrency(option.price)}</span>
-                                </li>
-                              ))}
+                            <ul className="mt-2 space-y-2">
+                              {item.options.map((option, optionIndex) => {
+                                const optionStock = getOptionStockStatus(catalog, option)
+                                const optionQty = option.qty ?? 1
+
+                                return (
+                                  <li
+                                    key={`${item.modelId}-${option.label}-${optionIndex}`}
+                                    className="flex flex-col gap-2 border-b border-[#e5ebf1] pb-2 last:border-b-0 last:pb-0"
+                                  >
+                                    <div className="flex items-center justify-between gap-3">
+                                      <span>{option.label}</span>
+                                      <span className="font-medium">{formatCurrency(option.price)}</span>
+                                    </div>
+
+                                    {!optionStock.inStock && (
+                                      <div className="flex items-center gap-2 rounded-lg bg-red-50 px-2 py-1 text-xs font-semibold text-red-600">
+                                        <AlertTriangle className="h-3.5 w-3.5 flex-shrink-0" />
+                                        <span>{optionStock.label}</span>
+                                      </div>
+                                    )}
+
+                                    <div className="flex items-center justify-between gap-3">
+                                      <div className="flex items-center rounded-full border border-[#d0d9e3] bg-white">
+                                        <button
+                                          type="button"
+                                          onClick={() => updateOptionQty(item.modelId, optionIndex, optionQty - 1)}
+                                          className="flex h-7 w-7 items-center justify-center text-[#1a3a52] transition hover:bg-[#f5f7fa]"
+                                        >
+                                          <Minus className="h-3.5 w-3.5" />
+                                        </button>
+                                        <span className="min-w-8 px-2 text-center text-xs font-semibold text-[#1a3a52]">
+                                          {optionQty}
+                                        </span>
+                                        <button
+                                          type="button"
+                                          onClick={() => updateOptionQty(item.modelId, optionIndex, optionQty + 1)}
+                                          disabled={!optionStock.inStock}
+                                          className="flex h-7 w-7 items-center justify-center text-[#1a3a52] transition hover:bg-[#f5f7fa] disabled:cursor-not-allowed disabled:opacity-40"
+                                        >
+                                          <Plus className="h-3.5 w-3.5" />
+                                        </button>
+                                      </div>
+
+                                      <button
+                                        type="button"
+                                        onClick={() => removeOption(item.modelId, optionIndex)}
+                                        className="inline-flex items-center gap-1 rounded-full px-2 py-1 text-xs font-semibold text-red-600 transition hover:bg-red-50"
+                                      >
+                                        <Trash2 className="h-3.5 w-3.5" />
+                                        Retirer
+                                      </button>
+                                    </div>
+                                  </li>
+                                )
+                              })}
                             </ul>
                           </div>
 
@@ -319,7 +430,8 @@ export default function CartPage() {
                                 <button
                                   type="button"
                                   onClick={() => updateQuantity(item.modelId, quantity + 1)}
-                                  className="flex h-9 w-9 items-center justify-center text-[#1a3a52] transition hover:bg-[#f5f7fa]"
+                                  disabled={!mainStock.inStock}
+                                  className="flex h-9 w-9 items-center justify-center text-[#1a3a52] transition hover:bg-[#f5f7fa] disabled:cursor-not-allowed disabled:opacity-40"
                                 >
                                   <Plus className="h-4 w-4" />
                                 </button>
@@ -347,6 +459,7 @@ export default function CartPage() {
                 }
 
                 if (item.type === 'spare') {
+                  const stock = getModelStockStatus(catalog, item.modelId)
                   const subtotal = item.price * quantity
 
                   return (
@@ -373,6 +486,13 @@ export default function CartPage() {
                             )}
                           </div>
 
+                          {!stock.inStock && (
+                            <div className="flex items-center gap-2 rounded-xl bg-red-50 px-3 py-2 text-sm font-semibold text-red-600">
+                              <AlertTriangle className="h-4 w-4 flex-shrink-0" />
+                              <span>{stock.label}</span>
+                            </div>
+                          )}
+
                           <div className="flex flex-wrap items-center justify-between gap-3">
                             <div className="flex items-center gap-3">
                               <span className="text-sm text-[#5a7a9a]">Qté</span>
@@ -388,7 +508,8 @@ export default function CartPage() {
                                 <button
                                   type="button"
                                   onClick={() => updateQuantity(item.modelId, quantity + 1)}
-                                  className="flex h-9 w-9 items-center justify-center text-[#1a3a52] transition hover:bg-[#f5f7fa]"
+                                  disabled={!stock.inStock}
+                                  className="flex h-9 w-9 items-center justify-center text-[#1a3a52] transition hover:bg-[#f5f7fa] disabled:cursor-not-allowed disabled:opacity-40"
                                 >
                                   <Plus className="h-4 w-4" />
                                 </button>
@@ -415,6 +536,7 @@ export default function CartPage() {
                   )
                 }
 
+                const stock = getModelStockStatus(catalog, item.modelId)
                 const subtotal = item.price * quantity
 
                 return (
@@ -437,6 +559,13 @@ export default function CartPage() {
                           <p className="mt-1 text-sm text-[#5a7a9a]">Référence: {item.reference}</p>
                         </div>
 
+                        {!stock.inStock && (
+                          <div className="flex items-center gap-2 rounded-xl bg-red-50 px-3 py-2 text-sm font-semibold text-red-600">
+                            <AlertTriangle className="h-4 w-4 flex-shrink-0" />
+                            <span>{stock.label}</span>
+                          </div>
+                        )}
+
                         <div className="flex flex-wrap items-center justify-between gap-3">
                           <div className="flex items-center gap-3">
                             <span className="text-sm text-[#5a7a9a]">Qté</span>
@@ -452,7 +581,8 @@ export default function CartPage() {
                               <button
                                 type="button"
                                 onClick={() => updateQuantity(item.modelId, quantity + 1)}
-                                className="flex h-9 w-9 items-center justify-center text-[#1a3a52] transition hover:bg-[#f5f7fa]"
+                                disabled={!stock.inStock}
+                                className="flex h-9 w-9 items-center justify-center text-[#1a3a52] transition hover:bg-[#f5f7fa] disabled:cursor-not-allowed disabled:opacity-40"
                               >
                                 <Plus className="h-4 w-4" />
                               </button>

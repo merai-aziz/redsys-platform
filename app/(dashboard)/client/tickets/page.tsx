@@ -1,10 +1,10 @@
 'use client'
 
-import { useEffect, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { 
   MessageSquare, Plus, Clock, CheckCircle, AlertCircle, 
   ChevronDown, ChevronUp, X, Mail, Phone, Calendar,
-  User, Package, MessageCircle, Send, Loader2
+  User, Package, MessageCircle, Send, Loader2, ChevronLeft, ChevronRight
 } from 'lucide-react'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
@@ -56,30 +56,35 @@ const PRIORITY_CONFIG: Record<TicketPriority, {
   label: string
   color: string
   bgColor: string
+  dot: string
   order: number
 }> = {
   LOW: {
     label: 'Basse',
     color: 'text-blue-700',
     bgColor: 'bg-blue-50 border-blue-200',
+    dot: 'bg-blue-500',
     order: 1,
   },
   MEDIUM: {
     label: 'Moyenne',
     color: 'text-amber-700',
     bgColor: 'bg-amber-50 border-amber-200',
+    dot: 'bg-amber-500',
     order: 2,
   },
   HIGH: {
     label: 'Haute',
     color: 'text-orange-700',
     bgColor: 'bg-orange-50 border-orange-200',
+    dot: 'bg-orange-500',
     order: 3,
   },
   URGENT: {
     label: 'Urgente',
     color: 'text-red-700',
     bgColor: 'bg-red-50 border-red-200',
+    dot: 'bg-red-500',
     order: 4,
   },
 }
@@ -174,14 +179,18 @@ function TicketCard({ ticket, onTicketUpdate }: { ticket: Ticket; onTicketUpdate
   }
 
   return (
-    <Card className="border-slate-200 bg-white shadow-sm transition hover:shadow-md">
+    <Card className="group border-slate-200 bg-white shadow-sm transition-all duration-200 hover:shadow-lg hover:border-slate-300">
       <CardHeader className="pb-3">
-        <div className="flex flex-wrap items-start justify-between gap-3">
+        <div className="flex flex-col gap-3 sm:flex-row sm:flex-wrap sm:items-start sm:justify-between">
           <div className="min-w-0 flex-1">
             <div className="flex flex-wrap items-center gap-2">
-              <CardTitle className="text-base font-bold text-slate-900">
-                #{shortId} - {ticket.title}
+              <span className={`h-2 w-2 shrink-0 rounded-full ${priorityConf.dot}`} />
+              <CardTitle className="text-sm font-bold text-slate-900 break-words sm:text-base">
+                <span className="text-slate-400 font-mono mr-1">#{shortId}</span>
+                {ticket.title}
               </CardTitle>
+            </div>
+            <div className="mt-2 flex flex-wrap items-center gap-1.5">
               <span className={`inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-[10px] font-semibold ${priorityConf.bgColor} ${priorityConf.color}`}>
                 {priorityConf.label}
               </span>
@@ -190,9 +199,16 @@ function TicketCard({ ticket, onTicketUpdate }: { ticket: Ticket; onTicketUpdate
                 {statusConf.label}
               </span>
             </div>
-            <CardDescription className="mt-0.5 text-xs text-slate-500">
-              Créé le {formatDate(ticket.createdAt)}
-              {ticket.assignedTo && ` · Assigné à ${ticket.assignedTo.firstName} ${ticket.assignedTo.lastName}`}
+            <CardDescription className="mt-1.5 flex flex-wrap items-center gap-x-1 text-xs text-slate-500">
+              <Calendar className="h-3 w-3 shrink-0" />
+              {formatDate(ticket.createdAt)}
+              {ticket.assignedTo && (
+                <span className="flex items-center gap-1">
+                  <span className="hidden sm:inline">·</span>
+                  <User className="h-3 w-3 shrink-0 sm:hidden" />
+                  Assigné à {ticket.assignedTo.firstName} {ticket.assignedTo.lastName}
+                </span>
+              )}
             </CardDescription>
           </div>
         </div>
@@ -200,8 +216,8 @@ function TicketCard({ ticket, onTicketUpdate }: { ticket: Ticket; onTicketUpdate
 
       <CardContent className="space-y-3">
         {/* Description */}
-        <div className="rounded-lg bg-slate-50 p-3">
-          <p className="text-sm text-slate-700">{ticket.description}</p>
+        <div className="rounded-lg bg-slate-50 p-3 ring-1 ring-slate-100">
+          <p className="text-sm text-slate-700 whitespace-pre-wrap break-words">{ticket.description}</p>
         </div>
 
         {/* Contrat lié */}
@@ -219,7 +235,7 @@ function TicketCard({ ticket, onTicketUpdate }: { ticket: Ticket; onTicketUpdate
         {/* Bouton détail */}
         <button
           onClick={() => setExpanded(v => !v)}
-          className="flex w-full items-center justify-between rounded-lg border border-slate-200 px-3 py-2 text-sm text-slate-600 transition hover:bg-slate-50"
+          className="flex w-full items-center justify-between rounded-lg border border-slate-200 px-3 py-2.5 text-sm text-slate-600 transition-colors hover:bg-slate-50 active:bg-slate-100"
         >
           <span className="font-medium flex items-center gap-2">
             <MessageSquare className="h-4 w-4" />
@@ -230,10 +246,11 @@ function TicketCard({ ticket, onTicketUpdate }: { ticket: Ticket; onTicketUpdate
 
         {/* Messages */}
         {expanded && (
-          <div className="space-y-3 rounded-xl border border-slate-100 bg-slate-50 p-3">
-            <div className="space-y-2 max-h-80 overflow-y-auto">
+          <div className="space-y-3 rounded-xl border border-slate-100 bg-slate-50 p-3 animate-in fade-in slide-in-from-top-1 duration-200">
+            <div className="space-y-2 max-h-80 overflow-y-auto pr-1">
               {comments.length === 0 ? (
-                <div className="rounded-lg border border-slate-200 bg-white p-6 text-center">
+                <div className="rounded-lg border border-dashed border-slate-200 bg-white p-6 text-center">
+                  <MessageSquare className="mx-auto h-6 w-6 text-slate-300 mb-2" />
                   <p className="text-sm text-slate-500">Aucun message pour le moment</p>
                   <p className="text-xs text-slate-400 mt-1">Soyez le premier à répondre</p>
                 </div>
@@ -241,22 +258,22 @@ function TicketCard({ ticket, onTicketUpdate }: { ticket: Ticket; onTicketUpdate
                 comments.map((comment) => (
                   <div key={comment.id} className="rounded-lg border border-slate-200 bg-white p-3">
                     <div className="flex flex-wrap items-center justify-between gap-2 mb-2">
-                      <div className="flex items-center gap-2">
-                        <div className="flex h-6 w-6 items-center justify-center rounded-full bg-sky-100 text-xs font-bold text-sky-700">
+                      <div className="flex items-center gap-2 min-w-0">
+                        <div className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-sky-100 text-xs font-bold text-sky-700">
                           {comment.author.firstName?.[0]}{comment.author.lastName?.[0]}
                         </div>
-                        <span className="text-xs font-semibold text-slate-900">
+                        <span className="text-xs font-semibold text-slate-900 truncate">
                           {comment.author.firstName} {comment.author.lastName}
                         </span>
                         {comment.author.userRole === 'ADMIN' && (
-                          <Badge className="bg-sky-100 text-sky-700 text-[9px]">Support</Badge>
+                          <Badge className="bg-sky-100 text-sky-700 text-[9px] shrink-0">Support</Badge>
                         )}
                       </div>
-                      <span className="text-[10px] text-slate-400">
+                      <span className="text-[10px] text-slate-400 shrink-0">
                         {formatDate(comment.createdAt)}
                       </span>
                     </div>
-                    <p className="text-sm text-slate-700">{comment.content}</p>
+                    <p className="text-sm text-slate-700 whitespace-pre-wrap break-words">{comment.content}</p>
                   </div>
                 ))
               )}
@@ -264,13 +281,13 @@ function TicketCard({ ticket, onTicketUpdate }: { ticket: Ticket; onTicketUpdate
 
             {/* Ajouter un message */}
             {ticket.status !== 'CLOSED' && ticket.status !== 'RESOLVED' && (
-              <div className="flex gap-2">
+              <div className="flex flex-col gap-2 sm:flex-row">
                 <textarea
                   value={newComment}
                   onChange={(e) => setNewComment(e.target.value)}
                   placeholder="Ajouter un message..."
                   rows={3}
-                  className="min-h-[60px] w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm text-slate-700 placeholder:text-slate-400 outline-none focus:border-sky-400 focus:ring-1 focus:ring-sky-400 resize-none"
+                  className="min-h-[60px] w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm text-slate-700 placeholder:text-slate-400 outline-none focus:border-sky-400 focus:ring-1 focus:ring-sky-400 resize-none transition-colors"
                   onKeyDown={(e) => {
                     if (e.key === 'Enter' && !e.shiftKey) {
                       e.preventDefault()
@@ -281,7 +298,7 @@ function TicketCard({ ticket, onTicketUpdate }: { ticket: Ticket; onTicketUpdate
                 <Button
                   onClick={handleAddComment}
                   disabled={submitting || !newComment.trim()}
-                  className="bg-sky-600 text-white hover:bg-sky-700 shrink-0"
+                  className="bg-sky-600 text-white hover:bg-sky-700 shrink-0 w-full sm:w-auto"
                 >
                   {submitting ? (
                     <Loader2 className="h-4 w-4 animate-spin" />
@@ -293,7 +310,7 @@ function TicketCard({ ticket, onTicketUpdate }: { ticket: Ticket; onTicketUpdate
             )}
 
             {ticket.status === 'RESOLVED' && (
-              <div className="rounded-lg bg-emerald-50 p-3 text-center text-xs text-emerald-700">
+              <div className="rounded-lg bg-emerald-50 p-3 text-center text-xs text-emerald-700 ring-1 ring-emerald-100">
                 Ce ticket a été résolu. Si le problème persiste, vous pouvez ajouter un message pour le rouvrir.
               </div>
             )}
@@ -362,16 +379,16 @@ function CreateTicketModal({ onClose, onCreated }: { onClose: () => void; onCrea
   }
 
   return (
-    <div className="fixed inset-0 z-50 flex items-start justify-center overflow-y-auto bg-black/40 p-4 sm:items-center">
-      <div className="relative w-full max-w-lg rounded-2xl border border-slate-200 bg-white shadow-2xl">
-        <div className="flex items-center justify-between border-b border-slate-100 px-5 py-4">
+    <div className="fixed inset-0 z-50 flex items-start justify-center overflow-y-auto bg-black/40 backdrop-blur-sm p-3 sm:items-center sm:p-4 animate-in fade-in duration-150">
+      <div className="relative my-4 w-full max-w-lg rounded-2xl border border-slate-200 bg-white shadow-2xl sm:my-0 animate-in zoom-in-95 slide-in-from-bottom-2 duration-200">
+        <div className="flex items-center justify-between border-b border-slate-100 px-4 py-4 sm:px-5">
           <h2 className="text-base font-bold text-slate-900 sm:text-lg">Nouveau ticket de support</h2>
-          <button onClick={onClose} className="rounded-lg p-1.5 text-slate-400 transition hover:bg-slate-100">
+          <button onClick={onClose} className="rounded-lg p-1.5 text-slate-400 transition hover:bg-slate-100 hover:text-slate-600">
             <X className="h-5 w-5" />
           </button>
         </div>
 
-        <div className="p-5 space-y-4">
+        <div className="p-4 space-y-4 sm:p-5">
           <div>
             <label className="mb-1 block text-xs font-semibold text-slate-600">
               Contrat lié (optionnel)
@@ -379,7 +396,7 @@ function CreateTicketModal({ onClose, onCreated }: { onClose: () => void; onCrea
             <select
               value={form.contractId}
               onChange={(e) => setForm(f => ({ ...f, contractId: e.target.value }))}
-              className="h-10 w-full rounded-lg border border-slate-200 bg-white px-3 text-sm text-slate-700 outline-none focus:border-sky-400"
+              className="h-10 w-full rounded-lg border border-slate-200 bg-white px-3 text-sm text-slate-700 outline-none focus:border-sky-400 focus:ring-1 focus:ring-sky-400 transition-colors"
               disabled={loadingContracts}
             >
               <option value="">-- Sélectionner un contrat --</option>
@@ -402,7 +419,7 @@ function CreateTicketModal({ onClose, onCreated }: { onClose: () => void; onCrea
               value={form.title}
               onChange={(e) => setForm(f => ({ ...f, title: e.target.value }))}
               placeholder="Problème avec mon équipement..."
-              className="border-slate-200"
+              className="border-slate-200 focus-visible:ring-sky-400"
             />
           </div>
 
@@ -415,7 +432,7 @@ function CreateTicketModal({ onClose, onCreated }: { onClose: () => void; onCrea
               onChange={(e) => setForm(f => ({ ...f, description: e.target.value }))}
               placeholder="Décrivez votre problème en détail..."
               rows={4}
-              className="w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm text-slate-700 placeholder:text-slate-400 outline-none focus:border-sky-400 focus:ring-1 focus:ring-sky-400 resize-none"
+              className="w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm text-slate-700 placeholder:text-slate-400 outline-none focus:border-sky-400 focus:ring-1 focus:ring-sky-400 resize-none transition-colors"
             />
           </div>
 
@@ -428,9 +445,9 @@ function CreateTicketModal({ onClose, onCreated }: { onClose: () => void; onCrea
                 <button
                   key={p}
                   onClick={() => setForm(f => ({ ...f, priority: p }))}
-                  className={`rounded-full px-3 py-1.5 text-xs font-semibold transition ${
+                  className={`rounded-full px-3 py-1.5 text-xs font-semibold transition-all ${
                     form.priority === p
-                      ? PRIORITY_CONFIG[p].bgColor + ' ' + PRIORITY_CONFIG[p].color
+                      ? PRIORITY_CONFIG[p].bgColor + ' ' + PRIORITY_CONFIG[p].color + ' ring-1 ring-offset-1 ' + PRIORITY_CONFIG[p].color.replace('text', 'ring')
                       : 'bg-slate-100 text-slate-500 hover:bg-slate-200'
                   }`}
                 >
@@ -440,7 +457,7 @@ function CreateTicketModal({ onClose, onCreated }: { onClose: () => void; onCrea
             </div>
           </div>
 
-          <div className="flex justify-end gap-3 border-t border-slate-100 pt-4">
+          <div className="flex flex-col-reverse justify-end gap-2 border-t border-slate-100 pt-4 sm:flex-row sm:gap-3">
             <Button variant="ghost" onClick={onClose} className="text-slate-600">
               Annuler
             </Button>
@@ -449,11 +466,88 @@ function CreateTicketModal({ onClose, onCreated }: { onClose: () => void; onCrea
               disabled={submitting || !form.title || !form.description}
               className="bg-sky-600 text-white hover:bg-sky-700"
             >
-              {submitting ? 'Création...' : 'Créer le ticket'}
+              {submitting ? (
+                <span className="flex items-center gap-1.5">
+                  <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                  Création...
+                </span>
+              ) : 'Créer le ticket'}
             </Button>
           </div>
         </div>
       </div>
+    </div>
+  )
+}
+
+const ITEMS_PER_PAGE = 5
+
+function Pagination({
+  currentPage,
+  totalPages,
+  onPageChange,
+}: {
+  currentPage: number
+  totalPages: number
+  onPageChange: (page: number) => void
+}) {
+  if (totalPages <= 1) return null
+
+  // Build a compact page list with ellipses for many pages
+  const pages: (number | 'dots')[] = []
+  const addPage = (p: number) => pages.push(p)
+
+  if (totalPages <= 7) {
+    for (let i = 1; i <= totalPages; i++) addPage(i)
+  } else {
+    addPage(1)
+    if (currentPage > 3) pages.push('dots')
+    const start = Math.max(2, currentPage - 1)
+    const end = Math.min(totalPages - 1, currentPage + 1)
+    for (let i = start; i <= end; i++) addPage(i)
+    if (currentPage < totalPages - 2) pages.push('dots')
+    addPage(totalPages)
+  }
+
+  return (
+    <div className="flex flex-wrap items-center justify-center gap-1.5 pt-2">
+      <button
+        onClick={() => onPageChange(Math.max(1, currentPage - 1))}
+        disabled={currentPage === 1}
+        className="inline-flex h-8 w-8 items-center justify-center rounded-lg border border-slate-200 bg-white text-slate-500 transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-40"
+        aria-label="Page précédente"
+      >
+        <ChevronLeft className="h-4 w-4" />
+      </button>
+
+      {pages.map((p, idx) =>
+        p === 'dots' ? (
+          <span key={`dots-${idx}`} className="px-1 text-xs text-slate-400">
+            …
+          </span>
+        ) : (
+          <button
+            key={p}
+            onClick={() => onPageChange(p)}
+            className={`inline-flex h-8 min-w-8 items-center justify-center rounded-lg px-2 text-xs font-semibold transition ${
+              p === currentPage
+                ? 'bg-sky-600 text-white shadow-sm'
+                : 'border border-slate-200 bg-white text-slate-600 hover:bg-slate-50'
+            }`}
+          >
+            {p}
+          </button>
+        )
+      )}
+
+      <button
+        onClick={() => onPageChange(Math.min(totalPages, currentPage + 1))}
+        disabled={currentPage === totalPages}
+        className="inline-flex h-8 w-8 items-center justify-center rounded-lg border border-slate-200 bg-white text-slate-500 transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-40"
+        aria-label="Page suivante"
+      >
+        <ChevronRight className="h-4 w-4" />
+      </button>
     </div>
   )
 }
@@ -463,6 +557,7 @@ export default function ClientTicketsPage() {
   const [loading, setLoading] = useState(true)
   const [showModal, setShowModal] = useState(false)
   const [filter, setFilter] = useState<TicketStatus | 'ALL'>('ALL')
+  const [currentPage, setCurrentPage] = useState(1)
 
   useEffect(() => {
     const controller = new AbortController()
@@ -484,9 +579,30 @@ export default function ClientTicketsPage() {
 
   const handleTicketCreate = (newTicket: Ticket) => {
     setTickets(prev => [newTicket, ...prev])
+    setFilter('ALL')
+    setCurrentPage(1)
+  }
+
+  const handleFilterChange = (key: TicketStatus | 'ALL') => {
+    setFilter(key)
+    setCurrentPage(1)
   }
 
   const filtered = filter === 'ALL' ? tickets : tickets.filter(t => t.status === filter)
+
+  const totalPages = Math.max(1, Math.ceil(filtered.length / ITEMS_PER_PAGE))
+
+  // Keep current page within bounds if the filtered list shrinks (e.g. after filtering)
+  const safePage = Math.min(currentPage, totalPages)
+  useEffect(() => {
+    if (currentPage !== safePage) setCurrentPage(safePage)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [filtered.length])
+
+  const paginated = useMemo(() => {
+    const start = (safePage - 1) * ITEMS_PER_PAGE
+    return filtered.slice(start, start + ITEMS_PER_PAGE)
+  }, [filtered, safePage])
 
   const counts = {
     ALL: tickets.length,
@@ -506,7 +622,7 @@ export default function ClientTicketsPage() {
   }
 
   return (
-    <div className="mx-auto w-full max-w-4xl space-y-6">
+    <div className="mx-auto w-full max-w-4xl space-y-5 px-3 sm:space-y-6 sm:px-4 md:px-0">
       {showModal && (
         <CreateTicketModal
           onClose={() => setShowModal(false)}
@@ -514,16 +630,16 @@ export default function ClientTicketsPage() {
         />
       )}
 
-      <div className="flex flex-wrap items-center justify-between gap-3">
+      <div className="flex flex-col gap-3 sm:flex-row sm:flex-wrap sm:items-center sm:justify-between">
         <div>
-          <h1 className="text-2xl font-black text-slate-900">Mes tickets support</h1>
+          <h1 className="text-xl font-black text-slate-900 sm:text-2xl">Mes tickets support</h1>
           <p className="mt-1 text-sm text-slate-500">
             {tickets.length} ticket{tickets.length !== 1 ? 's' : ''} au total
           </p>
         </div>
         <Button
           onClick={() => setShowModal(true)}
-          className="bg-sky-600 text-white hover:bg-sky-700"
+          className="bg-sky-600 text-white hover:bg-sky-700 w-full sm:w-auto"
         >
           <Plus className="mr-1.5 h-4 w-4" />
           Nouveau ticket
@@ -531,7 +647,7 @@ export default function ClientTicketsPage() {
       </div>
 
       {/* Filtres par statut */}
-      <div className="flex flex-wrap gap-2">
+      <div className="-mx-3 flex gap-2 overflow-x-auto px-3 pb-1 sm:mx-0 sm:flex-wrap sm:overflow-visible sm:px-0">
         {([
           ['ALL', 'Tous'],
           ['OPEN', 'Ouverts'],
@@ -542,8 +658,8 @@ export default function ClientTicketsPage() {
         ] as const).map(([key, label]) => (
           <button
             key={key}
-            onClick={() => setFilter(key as TicketStatus | 'ALL')}
-            className={`inline-flex items-center gap-1.5 rounded-full px-3 py-1.5 text-xs font-semibold transition ${
+            onClick={() => handleFilterChange(key as TicketStatus | 'ALL')}
+            className={`inline-flex shrink-0 items-center gap-1.5 rounded-full px-3 py-1.5 text-xs font-semibold transition-all ${
               filter === key
                 ? 'bg-sky-600 text-white shadow-sm'
                 : 'bg-white text-slate-600 shadow-sm ring-1 ring-slate-200 hover:bg-slate-50'
@@ -561,7 +677,7 @@ export default function ClientTicketsPage() {
 
       {/* Liste des tickets */}
       {filtered.length === 0 ? (
-        <div className="rounded-2xl border border-dashed border-slate-300 bg-white p-12 text-center">
+        <div className="rounded-2xl border border-dashed border-slate-300 bg-white p-8 text-center sm:p-12">
           <MessageSquare className="mx-auto h-10 w-10 text-slate-300" />
           <p className="mt-3 font-semibold text-slate-700">Aucun ticket</p>
           <p className="mt-1 text-sm text-slate-500">
@@ -579,11 +695,27 @@ export default function ClientTicketsPage() {
           </Button>
         </div>
       ) : (
-        <div className="space-y-4">
-          {filtered.map((ticket) => (
-            <TicketCard key={ticket.id} ticket={ticket} onTicketUpdate={handleTicketUpdate} />
-          ))}
-        </div>
+        <>
+          <div className="space-y-4">
+            {paginated.map((ticket) => (
+              <TicketCard key={ticket.id} ticket={ticket} onTicketUpdate={handleTicketUpdate} />
+            ))}
+          </div>
+
+          <div className="flex flex-col items-center gap-2 pt-1">
+            <p className="text-[11px] text-slate-400">
+              Page {safePage} sur {totalPages} · {filtered.length} ticket{filtered.length !== 1 ? 's' : ''}
+            </p>
+            <Pagination
+              currentPage={safePage}
+              totalPages={totalPages}
+              onPageChange={(p) => {
+                setCurrentPage(p)
+                window.scrollTo({ top: 0, behavior: 'smooth' })
+              }}
+            />
+          </div>
+        </>
       )}
     </div>
   )

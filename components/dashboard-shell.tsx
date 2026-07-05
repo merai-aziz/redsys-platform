@@ -4,7 +4,7 @@
 import Link from 'next/link'
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { usePathname, useRouter } from 'next/navigation'
-import { Bell, ChevronRight, Layers, LogOut, Menu, CheckCheck, ShoppingBag } from 'lucide-react'
+import { Bell, ChevronRight, Layers, LogOut, Menu, CheckCheck, ShoppingBag, AlertTriangle } from 'lucide-react'
 import type { LucideIcon } from 'lucide-react'
 
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar'
@@ -63,6 +63,9 @@ function getNotifHref(notif: AppNotification, role: UserRole): string {
   if (notif.referenceType === 'CONTRACT') {
     return role === 'ADMIN' ? '/admin/contracts' : `${prefix}/profile`
   }
+  if (notif.referenceType === 'STOCK') {
+    return '/admin/stock'
+  }
   return profileHrefFallback(role)
 }
 
@@ -74,6 +77,8 @@ function profileHrefFallback(role: UserRole): string {
 
 function NotificationIcon({ type }: { type: string }) {
   if (type === 'ORDER_STATUS_UPDATE') return <ShoppingBag className="h-4 w-4 text-sky-500" />
+  if (type === 'STOCK_ALERT') return <AlertTriangle className="h-4 w-4 text-red-500" />
+  if (type === 'SYSTEM') return <AlertTriangle className="h-4 w-4 text-amber-500" />
   return <Bell className="h-4 w-4 text-slate-400" />
 }
 
@@ -107,6 +112,18 @@ export function DashboardShell({
   const [notifications, setNotifications] = useState<AppNotification[]>([])
   const notifRef = useRef<HTMLDivElement>(null)
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null)
+  const stockAudioRef = useRef<HTMLAudioElement | null>(null)
+  const generalAudioRef = useRef<HTMLAudioElement | null>(null)
+  // ✅ FIX 1 — référence temporelle au montage du composant.
+  // On ne joue le son QUE pour les alertes créées après l'ouverture de la
+  // page admin courante. Sans ça, toute navigation entre pages admin
+  // remonte ce composant, réinitialise knownNotifIdsRef à zéro, et le
+  // premier fetch "absorbe" silencieusement des alertes déjà existantes
+  // (même une alerte vraiment nouvelle créée juste avant le remount).
+  const mountTimeRef = useRef<number>(Date.now())
+
+  // ✅ FIX 2 — Set initialisé directement (pas de null), simplifie la logique
+  const knownNotifIdsRef = useRef<Set<string>>(new Set())
 
   function redirectToLogin() {
     if (typeof window !== 'undefined') {
@@ -135,18 +152,65 @@ export function DashboardShell({
   }, [allowedRole])
 
   useEffect(() => {
+    stockAudioRef.current = new Audio('/sounds/stock-alert.mp3')
+    stockAudioRef.current.volume = 0.6
+
+    // ✅ Nouveau son pour commandes, tickets, et autres notifications
+    generalAudioRef.current = new Audio('/sounds/notification.mp3')
+    generalAudioRef.current.volume = 0.5
+  }, [])
+
+  useEffect(() => {
     if (!user) return
+
     async function fetchNotifications() {
       try {
         const res = await fetch('/api/notifications')
         if (res.ok) {
           const data = await res.json()
-          setNotifications(data.notifications ?? [])
+          const fresh: AppNotification[] = data.notifications ?? []
+
+          // ✅ FIX 3 — critères combinés pour déclencher le son :
+          // - non lue
+          // - type STOCK_ALERT
+          // - pas déjà vue dans un poll précédent (par id)
+          // - créée APRÈS le montage du composant (timestamp, pas un Set vide)
+          // ✅ Toutes les notifications nouvelles, non lues, créées après l'ouverture de la page
+          const newNotifs = fresh.filter(
+            (n) =>
+              !n.isRead &&
+              !knownNotifIdsRef.current.has(n.id) &&
+              new Date(n.createdAt).getTime() > mountTimeRef.current,
+          )
+
+          const newStockAlerts = newNotifs.filter((n) => n.type === 'STOCK_ALERT')
+          const newOtherNotifs = newNotifs.filter((n) => n.type !== 'STOCK_ALERT')
+
+          if (newStockAlerts.length > 0) {
+            console.log(`🔔 ${newStockAlerts.length} nouvelle(s) alerte(s) stock → son stock`)
+            stockAudioRef.current?.play().catch((e) => {
+              console.warn('⚠️ Lecture audio stock bloquée:', e.name, e.message)
+            })
+          }
+
+          if (newOtherNotifs.length > 0) {
+            console.log(
+              `🔔 ${newOtherNotifs.length} nouvelle(s) notification(s) → son général`,
+              newOtherNotifs.map((n) => n.type),
+            )
+            generalAudioRef.current?.play().catch((e) => {
+              console.warn('⚠️ Lecture audio général bloquée:', e.name, e.message)
+            })
+          }
+
+          knownNotifIdsRef.current = new Set(fresh.map((n) => n.id))
+          setNotifications(fresh)
         }
       } catch {
         // silencieux
       }
     }
+
     void fetchNotifications()
     pollRef.current = setInterval(fetchNotifications, 30000)
     return () => { if (pollRef.current) clearInterval(pollRef.current) }
@@ -167,7 +231,6 @@ export function DashboardShell({
     [notifications]
   )
 
-  // Badges par catégorie
   const orderUnread = useMemo(
     () => notifications.filter((n) => !n.isRead && (n.type === 'ORDER_STATUS_UPDATE' || n.referenceType === 'ORDER')).length,
     [notifications]
@@ -177,7 +240,6 @@ export function DashboardShell({
     [notifications]
   )
 
-  // navItems enrichis avec badges dynamiques
   const enrichedNavItems = useMemo(() => {
     return navItems.map((item) => {
       if (item.href.includes('orders') && orderUnread > 0) {

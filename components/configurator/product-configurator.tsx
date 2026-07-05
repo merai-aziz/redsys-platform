@@ -116,12 +116,23 @@ export function ProductConfigurator({
     .map((opt) => ({ opt, val: selectedValues[opt.id] }))
     .filter(({ val }) => val !== null && val.id !== -1)
 
-  function handleAddToCart() {
+function handleAddToCart() {
     if (!inStock) return
-    const selectedOptions = summaryItems.map(({ val, opt }) => ({
-      label: val?.value ?? opt.name,
-      price: (parseFloat(val?.price ?? '0') || 0) * getOptionQuantity(opt.id, val!),
-    }))
+    const selectedOptions = summaryItems.map(({ val, opt }) => {
+      const optQty = getOptionQuantity(opt.id, val!)
+      return {
+        label: val?.value ?? opt.name,
+        price: (parseFloat(val?.price ?? '0') || 0) * optQty,
+        // ✅ FIX : on transmet l'ID réel du ConfigurationValue choisi.
+        // C'est la clé qui permet à l'API /api/orders de retrouver le bon
+        // standard_product_id et de décrémenter EXACTEMENT ce qui a été
+        // sélectionné, au lieu de "deviner" une option disponible au hasard.
+        optionId: val!.id,
+        // ✅ FIX : on transmet la quantité de cette option (utile si l'utilisateur
+        // a pris ex. 3x un composant payant dans sa configuration).
+        qty: optQty,
+      }
+    })
     addItem({
       type: 'configurable',
       modelId,
@@ -132,7 +143,8 @@ export function ProductConfigurator({
       quantity,
       image: imageUrl ?? undefined,
     })
-  }
+}
+
 
   const safeFullDescription = sanitize(fullDescription)
   const trustBadges = [

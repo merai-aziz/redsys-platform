@@ -3,6 +3,7 @@ import { Prisma } from '@prisma/client'
 
 import { requireAdmin } from '@/lib/auth'
 import { prisma } from '@/lib/prisma'
+import { notifyStockThresholdCrossings } from '@/lib/stock-alerts'
 
 interface Params {
   params: Promise<{ id: string }>
@@ -90,6 +91,14 @@ export async function PUT(request: Request, context: Params) {
     : []
 
   const normalizedStock = inStock ? Math.max(1, Math.trunc(stockQty)) : 0
+
+  // ─── Stock AVANT modification (pour détecter le franchissement de seuil) ──
+  // Lu hors transaction, juste avant l'update, pour avoir l'état le plus
+  // récent possible sans verrouiller inutilement.
+  const productBefore = await prisma.product.findUnique({
+    where: { id: productId },
+    select: { id: true, name: true, stock_qty: true },
+  })
 
   let product
   try {
@@ -180,6 +189,16 @@ export async function PUT(request: Request, context: Params) {
     if (!(error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2021')) {
       throw error
     }
+  }
+
+  // ─── Alerte stock — uniquement sur franchissement de seuil ────────────────
+  // Hors transaction principale, comme pour /api/orders, pour ne pas bloquer
+  // la réponse en cas de souci sur la notif.
+  if (product && productBefore) {
+    await notifyStockThresholdCrossings(
+      [{ id: productBefore.id, name: productBefore.name, stock_qty: productBefore.stock_qty }],
+      [{ id: product.id, name: product.name, stock_qty: product.stock_qty }],
+    )
   }
 
   return NextResponse.json({ product })

@@ -1,10 +1,10 @@
 'use client'
 
-import { useEffect, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import {
-  Search, Plus, X, Building2, User, Calendar,
+  Search, Plus, X, User, Calendar,
   FileText, Shield, ShieldCheck, ShieldOff, Package,
-  Upload, Link as LinkIcon
+  Upload, Sparkles, ChevronLeft, ChevronRight, Pencil
 } from 'lucide-react'
 import { toast } from 'sonner'
 import { Button } from '@/components/ui/button'
@@ -15,9 +15,18 @@ import { ChevronDown, ChevronUp } from 'lucide-react'
 
 
 // ── Types ──────────────────────────────────────────────────────
+interface SelectedOption {
+  id?: string | number
+  optionName: string
+  valueName: string
+  groupName?: string | null
+  price?: number | string
+}
 interface ContractItem {
   id: string; name: string; description?: string; quantity: number
-  product?: { name: string; image_url?: string }
+  product?: { name: string; image_url?: string; type?: 'STANDARD' | 'CONFIGURABLE' }
+  // Présent uniquement si l'item est lié à un produit configurable ET que l'API le fournit
+  selectedOptions?: SelectedOption[]
 }
 interface ContractOrder {
   id: string; total: number; createdAt: string
@@ -38,7 +47,12 @@ interface ClientSearchResult {
 }
 interface OrderResult {
   id: string; total: number; createdAt: string; status: string
-  items: Array<{ id: string; quantity: number; unitPrice: number; description?: string; product?: { name: string } }>
+  items: Array<{
+    id: string; productId?: number | null; quantity: number; unitPrice: number; description?: string
+    product?: { name: string; type?: 'STANDARD' | 'CONFIGURABLE' }
+    // Présent si /api/admin/orders renvoie les options d'un produit configurable
+    selectedOptions?: Array<{ configurationValueId: number; quantity: number }>
+  }>
 }
 
 function formatDate(s: string) {
@@ -55,6 +69,23 @@ function warrantyStatus(warrantyEnd: string) {
   if (daysLeft <= 30) return { label: `${daysLeft}j restants`, color: 'text-amber-600', bg: 'bg-amber-50 border-amber-200', icon: <Shield className="h-3.5 w-3.5" /> }
   return { label: `${daysLeft}j restants`, color: 'text-emerald-600', bg: 'bg-emerald-50 border-emerald-200', icon: <ShieldCheck className="h-3.5 w-3.5" /> }
 }
+
+// ─── Regroupe les options par groupName pour un affichage plus clair ─────────
+function groupSelectedOptions(options: SelectedOption[]) {
+  const map = new Map<string, SelectedOption[]>()
+  const order: string[] = []
+  for (const opt of options) {
+    const key = opt.groupName?.trim() || opt.optionName
+    if (!map.has(key)) {
+      order.push(key)
+      map.set(key, [])
+    }
+    map.get(key)!.push(opt)
+  }
+  return order.map((key) => ({ groupLabel: key, items: map.get(key)! }))
+}
+
+const CONTRACTS_PER_PAGE = 6
 
 // ── Formulaire création contrat ────────────────────────────────
 function CreateContractModal({ onClose, onCreated }: { onClose: () => void; onCreated: (c: Contract) => void }) {
@@ -155,7 +186,15 @@ function CreateContractModal({ onClose, onCreated }: { onClose: () => void; onCr
     setSubmitting(true)
     try {
       const items = selectedOrder
-        ? selectedOrder.items.map(i => ({ productId: undefined, name: i.product?.name ?? i.description ?? 'Produit', quantity: i.quantity }))
+        ? selectedOrder.items.map(i => ({
+            productId: i.productId ?? undefined,
+            name: i.product?.name ?? i.description ?? 'Produit',
+            quantity: i.quantity,
+            selectedOptions: (i.selectedOptions ?? []).map(o => ({
+              configurationValueId: o.configurationValueId,
+              quantity: o.quantity ?? 1,
+            })),
+          }))
         : manualItems.filter(i => i.name.trim())
 
       const res = await fetch('/api/admin/contracts', {
@@ -377,19 +416,253 @@ function CreateContractModal({ onClose, onCreated }: { onClose: () => void; onCr
   )
 }
 
+// ── Formulaire modification contrat ────────────────────────────
+function EditContractModal({
+  contract, onClose, onUpdated,
+}: {
+  contract: Contract
+  onClose: () => void
+  onUpdated: (c: Contract) => void
+}) {
+  const [submitting, setSubmitting] = useState(false)
+  const [uploadingFile, setUploadingFile] = useState(false)
+  const [form, setForm] = useState({
+    companyName: contract.companyName,
+    clientPhone: contract.clientPhone ?? '',
+    description: contract.description ?? '',
+    fileUrl: contract.fileUrl ?? '',
+    warrantyMonths: contract.warrantyMonths,
+    warrantyStart: contract.warrantyStart.split('T')[0],
+  })
+
+  async function handleFileUpload(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0]
+    if (!file) return
+
+    if (file.size > 10 * 1024 * 1024) {
+      toast.error('Le fichier ne doit pas dépasser 10 Mo')
+      return
+    }
+
+    const allowedTypes = ['application/pdf', 'image/jpeg', 'image/png', 'application/msword', 'application/vnd.openxmlformats-officedocument.wordprocessingml.document']
+    if (!allowedTypes.includes(file.type)) {
+      toast.error('Format non supporté. Utilisez PDF, JPG, PNG ou DOC')
+      return
+    }
+
+    setUploadingFile(true)
+    try {
+      const formData = new FormData()
+      formData.append('file', file)
+
+      const res = await fetch('/api/admin/upload', { method: 'POST', body: formData })
+      if (!res.ok) throw new Error('Upload failed')
+
+      const data = await res.json()
+      setForm(f => ({ ...f, fileUrl: data.fileUrl }))
+      toast.success('Fichier uploadé avec succès')
+    } catch (error) {
+      console.error('Upload error:', error)
+      toast.error('Erreur lors de l\'upload du fichier')
+    } finally {
+      setUploadingFile(false)
+    }
+  }
+
+  async function handleSubmit() {
+    if (!form.companyName || !form.warrantyStart) {
+      toast.error('Champs obligatoires manquants')
+      return
+    }
+    setSubmitting(true)
+    try {
+      const res = await fetch(`/api/admin/contracts/${contract.id}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          companyName: form.companyName,
+          clientPhone: form.clientPhone || null,
+          description: form.description || null,
+          fileUrl: form.fileUrl || null,
+          warrantyMonths: form.warrantyMonths,
+          warrantyStart: form.warrantyStart,
+        }),
+      })
+      if (res.ok) {
+        const data = await res.json()
+        onUpdated(data.contract)
+        toast.success('Contrat mis à jour')
+        onClose()
+      } else {
+        const data = await res.json()
+        toast.error(data.error ?? 'Erreur')
+      }
+    } catch { toast.error('Erreur réseau') }
+    finally { setSubmitting(false) }
+  }
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-start justify-center overflow-y-auto bg-black/40 p-4 sm:items-center">
+      <div className="relative w-full max-w-2xl rounded-2xl border border-slate-200 bg-white shadow-2xl">
+        <div className="flex items-center justify-between border-b border-slate-100 px-5 py-4">
+          <h2 className="text-base font-bold text-slate-900 sm:text-lg">Modifier le contrat</h2>
+          <button onClick={onClose} className="rounded-lg p-1.5 text-slate-400 transition hover:bg-slate-100">
+            <X className="h-5 w-5" />
+          </button>
+        </div>
+
+        <div className="p-5">
+          <div className="space-y-4">
+            <div className="flex items-center gap-3 rounded-xl bg-sky-50 px-4 py-3">
+              <User className="h-5 w-5 shrink-0 text-sky-600" />
+              <div className="min-w-0 flex-1">
+                <p className="text-sm font-semibold text-slate-900">{contract.clientFirstName} {contract.clientLastName}</p>
+                <p className="text-xs text-slate-500">{contract.clientEmail}</p>
+              </div>
+            </div>
+
+            <div className="grid gap-3 sm:grid-cols-2">
+              <div className="sm:col-span-2">
+                <label className="mb-1 block text-xs font-semibold text-slate-600">Société *</label>
+                <Input value={form.companyName} onChange={e => setForm(f => ({ ...f, companyName: e.target.value }))} className="border-slate-200" />
+              </div>
+              <div>
+                <label className="mb-1 block text-xs font-semibold text-slate-600">Téléphone</label>
+                <Input value={form.clientPhone} onChange={e => setForm(f => ({ ...f, clientPhone: e.target.value }))} className="border-slate-200" />
+              </div>
+              <div>
+                <label className="mb-1 block text-xs font-semibold text-slate-600">Durée garantie (mois) *</label>
+                <Input type="number" min={1} max={60} value={form.warrantyMonths} onChange={e => setForm(f => ({ ...f, warrantyMonths: Number(e.target.value) }))} className="border-slate-200" />
+              </div>
+              <div className="sm:col-span-2">
+                <label className="mb-1 block text-xs font-semibold text-slate-600">Date début garantie *</label>
+                <Input type="date" value={form.warrantyStart} onChange={e => setForm(f => ({ ...f, warrantyStart: e.target.value }))} className="border-slate-200" />
+              </div>
+
+              <div className="sm:col-span-2">
+                <label className="mb-1 block text-xs font-semibold text-slate-600">Document du contrat (PDF, image, etc.)</label>
+                <div className="flex gap-2">
+                  <div className="flex-1">
+                    <Input
+                      value={form.fileUrl}
+                      onChange={e => setForm(f => ({ ...f, fileUrl: e.target.value }))}
+                      placeholder="https://... ou /uploads/contrat.pdf"
+                      className="border-slate-200"
+                    />
+                  </div>
+                  <div className="relative">
+                    <input
+                      type="file"
+                      accept=".pdf,.jpg,.jpeg,.png,.doc,.docx"
+                      onChange={handleFileUpload}
+                      disabled={uploadingFile}
+                      className="absolute inset-0 opacity-0 cursor-pointer"
+                    />
+                    <Button type="button" disabled={uploadingFile} variant="outline" className="border-slate-200">
+                      {uploadingFile ? (
+                        <div className="h-4 w-4 animate-spin rounded-full border-2 border-slate-300 border-t-sky-600" />
+                      ) : (
+                        <Upload className="h-4 w-4" />
+                      )}
+                    </Button>
+                  </div>
+                </div>
+                <p className="mt-1 text-[10px] text-slate-400">Formats acceptés: PDF, JPG, PNG, DOC (max 10 Mo)</p>
+              </div>
+
+              <div className="sm:col-span-2">
+                <label className="mb-1 block text-xs font-semibold text-slate-600">Description / Notes</label>
+                <textarea
+                  value={form.description}
+                  onChange={e => setForm(f => ({ ...f, description: e.target.value }))}
+                  rows={2}
+                  className="w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm text-slate-700 outline-none focus:border-sky-400 resize-none"
+                  placeholder="Notes sur le contrat..."
+                />
+              </div>
+            </div>
+
+            <div className="flex justify-end gap-3 border-t border-slate-100 pt-4">
+              <Button variant="ghost" onClick={onClose} className="text-slate-600">Annuler</Button>
+              <Button onClick={handleSubmit} disabled={submitting} className="bg-sky-600 text-white hover:bg-sky-700">
+                {submitting ? 'Enregistrement...' : 'Enregistrer'}
+              </Button>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+
+function ContractItemRow({ item }: { item: ContractItem }) {
+  const isConfigurable = item.product?.type === 'CONFIGURABLE'
+  const options = item.selectedOptions ?? []
+  const groupedOptions = useMemo(() => groupSelectedOptions(options), [options])
+
+  return (
+    <div className="overflow-hidden rounded-lg border border-slate-200 bg-white">
+      <div className="flex items-center gap-2 p-2.5">
+        <Package className="h-4 w-4 shrink-0 text-slate-400" />
+        <div className="min-w-0 flex-1">
+          <div className="flex flex-wrap items-center gap-1.5">
+            <p className="text-xs font-semibold text-slate-900">{item.name}</p>
+            {isConfigurable && (
+              <span className="inline-flex shrink-0 items-center rounded-full bg-purple-50 px-1.5 py-0.5 text-[9px] font-semibold text-purple-700">
+                Configuré
+              </span>
+            )}
+          </div>
+          {item.description && <p className="text-[10px] text-slate-400">{item.description}</p>}
+        </div>
+        <span className="text-xs text-slate-500">×{item.quantity}</span>
+      </div>
+
+      {isConfigurable && options.length > 0 && (
+        <div className="space-y-1.5 border-t border-slate-100 bg-slate-50/70 px-2.5 py-2">
+          {groupedOptions.map(({ groupLabel, items: groupItems }) => (
+            <div key={groupLabel} className="rounded-md border border-slate-200 bg-white px-2 py-1.5">
+              <p className="mb-1 text-[9px] font-bold uppercase tracking-wide text-slate-400">{groupLabel}</p>
+              <div className="space-y-1">
+                {groupItems.map((opt, idx) => (
+                  <div key={opt.id ?? `${opt.optionName}-${idx}`} className="flex items-center justify-between gap-2">
+                    <span className="flex items-center gap-1.5 text-[11px] font-medium text-slate-700">
+                      <span className="h-1 w-1 shrink-0 rounded-full bg-[#2ad1a4]" />
+                      {opt.valueName}
+                    </span>
+                    {Number(opt.price) > 0 && (
+                      <span className="shrink-0 text-[10px] font-semibold text-[#0f6e56]">+{formatCurrency(opt.price!)}</span>
+                    )}
+                  </div>
+                ))}
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  )
+}
+
 // ── Carte contrat ──────────────────────────────────────────────
-function ContractCard({ contract }: { contract: Contract }) {
+function ContractCard({ contract, isNew, onEdit }: { contract: Contract; isNew: boolean; onEdit: () => void }) {
   const [expanded, setExpanded] = useState(false)
   const ws = warrantyStatus(contract.warrantyEnd)
   const openTickets = (contract.tickets ?? []).filter(t => !['CLOSED', 'RESOLVED'].includes(t.status)).length
 
   return (
-    <Card className="border-slate-200 bg-white shadow-sm transition hover:shadow-md">
+    <Card className={`bg-white shadow-sm transition hover:shadow-md ${isNew ? 'border-emerald-300 ring-2 ring-emerald-200' : 'border-slate-200'}`}>
       <CardHeader className="pb-2">
         <div className="flex flex-wrap items-start justify-between gap-2">
           <div className="min-w-0 flex-1">
             <div className="flex flex-wrap items-center gap-2">
               <CardTitle className="text-sm font-bold text-slate-900 sm:text-base">{contract.companyName}</CardTitle>
+              {isNew && (
+                <span className="inline-flex items-center gap-1 rounded-full border border-emerald-200 bg-emerald-50 px-2 py-0.5 text-[10px] font-semibold text-emerald-700">
+                  <Sparkles className="h-3 w-3" /> Nouveau
+                </span>
+              )}
               <span className={`inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-[10px] font-semibold ${ws.bg} ${ws.color}`}>
                 {ws.icon}{ws.label}
               </span>
@@ -401,6 +674,15 @@ function ContractCard({ contract }: { contract: Contract }) {
               {contract.clientFirstName} {contract.clientLastName} · {contract.clientEmail}
             </CardDescription>
           </div>
+          <Button 
+            onClick={onEdit} 
+            variant="ghost" 
+            size="sm" 
+            className="shrink-0 text-slate-400 hover:text-sky-600 hover:bg-sky-50"
+          >
+            <Pencil className="h-4 w-4" />
+            <span className="sr-only">Modifier</span>
+          </Button>
         </div>
       </CardHeader>
 
@@ -442,19 +724,77 @@ function ContractCard({ contract }: { contract: Contract }) {
         {expanded && (contract.contractItems?.length ?? 0) > 0 && (
           <div className="space-y-2 rounded-xl border border-slate-100 bg-slate-50 p-3">
             {contract.contractItems.map(item => (
-              <div key={item.id} className="flex items-center gap-2 rounded-lg border border-slate-200 bg-white p-2.5">
-                <Package className="h-4 w-4 shrink-0 text-slate-400" />
-                <div className="min-w-0 flex-1">
-                  <p className="text-xs font-semibold text-slate-900">{item.name}</p>
-                  {item.description && <p className="text-[10px] text-slate-400">{item.description}</p>}
-                </div>
-                <span className="text-xs text-slate-500">×{item.quantity}</span>
-              </div>
+              <ContractItemRow key={item.id} item={item} />
             ))}
           </div>
         )}
       </CardContent>
     </Card>
+  )
+}
+
+// ─── Pagination ───────────────────────────────────────────────
+function ContractsPagination({
+  currentPage, totalPages, totalItems, itemsPerPage, onPageChange,
+}: {
+  currentPage: number; totalPages: number; totalItems: number; itemsPerPage: number
+  onPageChange: (page: number) => void
+}) {
+  const pageNumbers = useMemo(() => {
+    const pages: (number | 'ellipsis')[] = []
+    const delta = 1
+    for (let i = 1; i <= totalPages; i++) {
+      if (i === 1 || i === totalPages || (i >= currentPage - delta && i <= currentPage + delta)) {
+        pages.push(i)
+      } else if (pages[pages.length - 1] !== 'ellipsis') {
+        pages.push('ellipsis')
+      }
+    }
+    return pages
+  }, [currentPage, totalPages])
+
+  if (totalPages <= 1) return null
+
+  return (
+    <div className="flex flex-col items-center justify-between gap-3 rounded-xl border border-slate-200 bg-white px-4 py-3 shadow-sm sm:flex-row">
+      <p className="text-xs text-slate-500">
+        Affichage {(currentPage - 1) * itemsPerPage + 1}
+        –{Math.min(currentPage * itemsPerPage, totalItems)} sur {totalItems}
+      </p>
+      <div className="flex items-center gap-1">
+        <button
+          onClick={() => onPageChange(currentPage - 1)}
+          disabled={currentPage === 1}
+          className="inline-flex h-8 w-8 items-center justify-center rounded-md border border-slate-200 text-slate-600 transition hover:bg-slate-50 disabled:opacity-40 disabled:hover:bg-transparent"
+        >
+          <ChevronLeft className="h-4 w-4" />
+        </button>
+        <div className="flex items-center gap-1">
+          {pageNumbers.map((p, idx) =>
+            p === 'ellipsis' ? (
+              <span key={`ellipsis-${idx}`} className="px-1.5 text-xs text-slate-400">…</span>
+            ) : (
+              <button
+                key={p}
+                onClick={() => onPageChange(p)}
+                className={`h-8 min-w-[2rem] rounded-md px-2 text-xs font-semibold transition ${
+                  p === currentPage ? 'bg-sky-600 text-white shadow-sm' : 'text-slate-600 hover:bg-slate-100'
+                }`}
+              >
+                {p}
+              </button>
+            )
+          )}
+        </div>
+        <button
+          onClick={() => onPageChange(currentPage + 1)}
+          disabled={currentPage === totalPages}
+          className="inline-flex h-8 w-8 items-center justify-center rounded-md border border-slate-200 text-slate-600 transition hover:bg-slate-50 disabled:opacity-40 disabled:hover:bg-transparent"
+        >
+          <ChevronRight className="h-4 w-4" />
+        </button>
+      </div>
+    </div>
   )
 }
 
@@ -464,6 +804,10 @@ export default function AdminContractsPage() {
   const [loading, setLoading] = useState(true)
   const [search, setSearch] = useState('')
   const [showModal, setShowModal] = useState(false)
+  const [showEditModal, setShowEditModal] = useState(false)
+  const [editingContract, setEditingContract] = useState<Contract | null>(null)
+  const [currentPage, setCurrentPage] = useState(1)
+  const [recentlyCreatedId, setRecentlyCreatedId] = useState<string | null>(null)
 
   useEffect(() => {
     const controller = new AbortController()
@@ -486,6 +830,35 @@ export default function AdminContractsPage() {
     )
   })
 
+  // Revenir à la page 1 dès que la recherche change
+  useEffect(() => {
+    setCurrentPage(1)
+  }, [search])
+
+  const totalPages = Math.max(1, Math.ceil(filtered.length / CONTRACTS_PER_PAGE))
+  const safePage = Math.min(currentPage, totalPages)
+  const paginated = filtered.slice(
+    (safePage - 1) * CONTRACTS_PER_PAGE,
+    safePage * CONTRACTS_PER_PAGE
+  )
+
+  function handleCreated(c: Contract) {
+    setContracts(prev => [c, ...prev])
+    setRecentlyCreatedId(c.id)
+    setCurrentPage(1) // le nouveau contrat est en tête, donc page 1 pour le voir tout de suite
+  }
+
+  function handleEdit(contract: Contract) {
+    setEditingContract(contract)
+    setShowEditModal(true)
+  }
+
+  function handleUpdated(updatedContract: Contract) {
+    setContracts(prev => 
+      prev.map(c => c.id === updatedContract.id ? updatedContract : c)
+    )
+  }
+
   if (loading) return (
     <div className="flex items-center justify-center py-20">
       <div className="h-8 w-8 animate-spin rounded-full border-4 border-slate-200 border-t-sky-500" />
@@ -497,7 +870,15 @@ export default function AdminContractsPage() {
       {showModal && (
         <CreateContractModal
           onClose={() => setShowModal(false)}
-          onCreated={(c) => setContracts(prev => [c as unknown as Contract, ...prev])}
+          onCreated={(c) => handleCreated(c as unknown as Contract)}
+        />
+      )}
+
+      {showEditModal && editingContract && (
+        <EditContractModal
+          contract={editingContract}
+          onClose={() => { setShowEditModal(false); setEditingContract(null) }}
+          onUpdated={handleUpdated}
         />
       )}
 
@@ -524,11 +905,26 @@ export default function AdminContractsPage() {
           <p className="mt-1 text-sm text-slate-500">Créez un contrat de garantie pour un client.</p>
         </div>
       ) : (
-        <div className="space-y-3">
-          {filtered.map(contract => (
-            <ContractCard key={contract.id} contract={contract} />
-          ))}
-        </div>
+        <>
+          <div className="space-y-3">
+            {paginated.map(contract => (
+              <ContractCard 
+                key={contract.id} 
+                contract={contract} 
+                isNew={contract.id === recentlyCreatedId}
+                onEdit={() => handleEdit(contract)}
+              />
+            ))}
+          </div>
+
+          <ContractsPagination
+            currentPage={safePage}
+            totalPages={totalPages}
+            totalItems={filtered.length}
+            itemsPerPage={CONTRACTS_PER_PAGE}
+            onPageChange={setCurrentPage}
+          />
+        </>
       )}
     </div>
   )

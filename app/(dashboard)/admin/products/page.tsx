@@ -84,6 +84,125 @@ interface GroupValue {
   products: string[]  // IDs des produits standards sous forme de string
 }
 
+// ─── Recherche / tri / pagination (liste produits) ───────────────────────────
+
+type SortOption =
+  | 'default'
+  | 'name_asc'
+  | 'name_desc'
+  | 'price_asc'
+  | 'price_desc'
+  | 'stock_asc'
+  | 'stock_desc'
+  | 'newest'
+  | 'oldest'
+
+const PRODUCTS_PER_PAGE = 8
+
+function filterProducts(list: Product[], query: string): Product[] {
+  const q = query.trim().toLowerCase()
+  if (!q) return list
+  return list.filter((p) => {
+    const haystack = `${p.name} ${p.brand.name} ${p.category.name} ${p.family.name} ${p.type}`.toLowerCase()
+    return haystack.includes(q)
+  })
+}
+
+function sortProducts(list: Product[], sortBy: SortOption): Product[] {
+  const arr = [...list]
+  switch (sortBy) {
+    case 'name_asc':
+      return arr.sort((a, b) => a.name.localeCompare(b.name))
+    case 'name_desc':
+      return arr.sort((a, b) => b.name.localeCompare(a.name))
+    case 'price_asc':
+      return arr.sort((a, b) => Number(a.base_price) - Number(b.base_price))
+    case 'price_desc':
+      return arr.sort((a, b) => Number(b.base_price) - Number(a.base_price))
+    case 'stock_asc':
+      return arr.sort((a, b) => a.stock_qty - b.stock_qty)
+    case 'stock_desc':
+      return arr.sort((a, b) => b.stock_qty - a.stock_qty)
+    case 'newest':
+      return arr.sort((a, b) => b.id - a.id)
+    case 'oldest':
+      return arr.sort((a, b) => a.id - b.id)
+    default:
+      return arr
+  }
+}
+
+function ProductsPagination({
+  currentPage,
+  totalPages,
+  onPageChange,
+}: {
+  currentPage: number
+  totalPages: number
+  onPageChange: (page: number) => void
+}) {
+  if (totalPages <= 1) return null
+
+  const pageNumbers = useMemo(() => {
+    const pages: (number | 'ellipsis')[] = []
+    const delta = 1
+    for (let i = 1; i <= totalPages; i++) {
+      if (i === 1 || i === totalPages || (i >= currentPage - delta && i <= currentPage + delta)) {
+        pages.push(i)
+      } else if (pages[pages.length - 1] !== 'ellipsis') {
+        pages.push('ellipsis')
+      }
+    }
+    return pages
+  }, [currentPage, totalPages])
+
+  return (
+    <div className="flex flex-col items-center justify-between gap-3 border-t border-slate-100 pt-4 sm:flex-row">
+      <Button
+        onClick={() => onPageChange(currentPage - 1)}
+        disabled={currentPage === 1}
+        variant="outline"
+        size="sm"
+        className="h-8 w-full text-xs sm:w-auto"
+      >
+        ← Précédent
+      </Button>
+
+      <div className="flex flex-wrap items-center justify-center gap-1">
+        {pageNumbers.map((p, idx) =>
+          p === 'ellipsis' ? (
+            <span key={`ellipsis-${idx}`} className="px-1.5 text-xs text-slate-400">
+              …
+            </span>
+          ) : (
+            <button
+              key={p}
+              onClick={() => onPageChange(p)}
+              className={`h-8 min-w-[2rem] rounded-md px-2 text-xs font-semibold transition ${
+                p === currentPage
+                  ? 'bg-slate-900 text-white shadow-sm'
+                  : 'text-slate-600 hover:bg-slate-100'
+              }`}
+            >
+              {p}
+            </button>
+          )
+        )}
+      </div>
+
+      <Button
+        onClick={() => onPageChange(currentPage + 1)}
+        disabled={currentPage === totalPages}
+        variant="outline"
+        size="sm"
+        className="h-8 w-full text-xs sm:w-auto"
+      >
+        Suivant →
+      </Button>
+    </div>
+  )
+}
+
 // ─── ImageUploadField ────────────────────────────────────────────────────────
 
 interface ImageUploadFieldProps {
@@ -294,6 +413,13 @@ export default function AdminProductsPage() {
   const [editingOptionId, setEditingOptionId] = useState<number | null>(null)
   const [standardProductSearch, setStandardProductSearch] = useState('')
 
+  // ── Recherche / tri / pagination liste produits ─────────────────────────────
+  const [productSearch, setProductSearch] = useState('')
+  const [productSort, setProductSort] = useState<SortOption>('default')
+  const [productPage, setProductPage] = useState(1)
+  const [highlightedProductId, setHighlightedProductId] = useState<number | null>(null)
+  const highlightTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+
   const standardProducts = useMemo(
     () => products.filter((p) => p.type === 'STANDARD').sort((a, b) => a.name.localeCompare(b.name)),
     [products],
@@ -319,7 +445,25 @@ export default function AdminProductsPage() {
     return Array.from(map.values()).sort((a, b) => a.familyName.localeCompare(b.familyName))
   }, [filteredStandardProducts])
 
-  async function loadAll() {
+  // Liste produits filtrée + triée pour le tableau
+  const processedProducts = useMemo(
+    () => sortProducts(filterProducts(products, productSearch), productSort),
+    [products, productSearch, productSort],
+  )
+
+  const productTotalPages = Math.max(1, Math.ceil(processedProducts.length / PRODUCTS_PER_PAGE))
+  const productSafePage = Math.min(productPage, productTotalPages)
+  const paginatedProducts = processedProducts.slice(
+    (productSafePage - 1) * PRODUCTS_PER_PAGE,
+    productSafePage * PRODUCTS_PER_PAGE,
+  )
+
+  // Revenir à la page 1 dès que la recherche ou le tri change
+  useEffect(() => {
+    setProductPage(1)
+  }, [productSearch, productSort])
+
+  async function loadAll(): Promise<Product[]> {
     async function safeJson(response: Response) {
       const text = await response.text()
       if (!text) return null
@@ -351,14 +495,18 @@ export default function AdminProductsPage() {
         (filtersJson as { error?: string } | null)?.error,
       ].find(Boolean)
       toast.error(errorMessage || 'Chargement des donnees impossible')
-      return
+      return []
     }
 
-    setProducts((productsJson as { products?: Product[] } | null)?.products || [])
+    const productsList = (productsJson as { products?: Product[] } | null)?.products || []
+
+    setProducts(productsList)
     setBrands((brandsJson as { brands?: Brand[] } | null)?.brands || [])
     setCategories((categoriesJson as { categories?: Category[] } | null)?.categories || [])
     setFamilies((familiesJson as { families?: Family[] } | null)?.families || [])
     setFilters((filtersJson as { filters?: Filter[] } | null)?.filters || [])
+
+    return productsList
   }
 
   useEffect(() => {
@@ -366,6 +514,12 @@ export default function AdminProductsPage() {
     async function bootstrap() { if (!ignore) await loadAll() }
     void bootstrap()
     return () => { ignore = true }
+  }, [])
+
+  useEffect(() => {
+    return () => {
+      if (highlightTimeoutRef.current) clearTimeout(highlightTimeoutRef.current)
+    }
   }, [])
 
   const visibleFamilies = useMemo(() => {
@@ -500,7 +654,29 @@ export default function AdminProductsPage() {
 
     toast.success(editingId ? 'Produit modifié' : 'Produit créé')
     setShowDialog(false)
-    await loadAll()
+
+    const wasCreating = !editingId
+    const updatedProducts = await loadAll()
+
+    // ── Marquage du produit nouvellement créé ─────────────────────────────
+    if (wasCreating && updatedProducts.length > 0) {
+      const newest = updatedProducts.reduce((max, p) => (p.id > max.id ? p : max), updatedProducts[0])
+
+      // On s'assure qu'il soit visible : on retire la recherche et on va sur sa page
+      setProductSearch('')
+      const sorted = sortProducts(updatedProducts, productSort)
+      const idx = sorted.findIndex((p) => p.id === newest.id)
+      const page = idx >= 0 ? Math.floor(idx / PRODUCTS_PER_PAGE) + 1 : 1
+      setProductPage(page)
+
+      setHighlightedProductId(newest.id)
+      if (highlightTimeoutRef.current) clearTimeout(highlightTimeoutRef.current)
+      highlightTimeoutRef.current = setTimeout(() => setHighlightedProductId(null), 10000)
+
+      toast.message('Nouveau produit repéré', {
+        description: `« ${newest.name} » est surligné dans la liste. Ajoutez ses options si besoin, ou ignorez.`,
+      })
+    }
   }
 
   async function removeProduct(product: Product) {
@@ -674,78 +850,145 @@ export default function AdminProductsPage() {
 
   return (
     <div className="space-y-6">
-      <div className="flex items-center justify-between gap-3">
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
         <div>
-          <h1 className="text-2xl font-bold text-slate-900">Produits</h1>
+          <h1 className="text-xl font-bold text-slate-900 sm:text-2xl">Produits</h1>
           <p className="text-sm text-slate-500">Gestion des Product + ConfigurationOption + ProductFilterValue.</p>
         </div>
-        <Button onClick={openCreate}>Nouveau produit</Button>
+        <Button onClick={openCreate} className="w-full sm:w-auto">Nouveau produit</Button>
       </div>
 
       <Card>
         <CardHeader>
           <CardTitle>Liste</CardTitle>
-          <CardDescription>{products.length} produits dans le catalogue.</CardDescription>
+          <CardDescription>
+            {productSearch || productSort !== 'default'
+              ? `${processedProducts.length} produit${processedProducts.length !== 1 ? 's' : ''} trouvé${processedProducts.length !== 1 ? 's' : ''} sur ${products.length} au total.`
+              : `${products.length} produits dans le catalogue.`}
+          </CardDescription>
         </CardHeader>
-        <CardContent>
-          <Table>
-            <TableHeader>
-              <TableRow>
-                <TableHead>Nom</TableHead>
-                <TableHead>Type</TableHead>
-                <TableHead>Brand / Family</TableHead>
-                <TableHead>Stock / PoE</TableHead>
-                <TableHead>Prix</TableHead>
-                <TableHead className="text-right">Actions</TableHead>
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {products.map((product) => (
-                <TableRow key={product.id}>
-                  <TableCell className="font-medium">
-                    <div className="flex items-center gap-2">
-                      {product.image_url && (
-                        // eslint-disable-next-line @next/next/no-img-element
-                        <img
-                          src={product.image_url}
-                          alt={product.name}
-                          className="h-8 w-8 rounded object-cover border border-slate-100 shrink-0"
-                          onError={(e) => { (e.currentTarget as HTMLImageElement).style.display = 'none' }}
-                        />
-                      )}
-                      {product.name}
-                    </div>
-                  </TableCell>
-                  <TableCell>{product.type}</TableCell>
-                  <TableCell>
-                    <p>{product.brand.name}</p>
-                    <p className="text-xs text-slate-500">{product.family.name} / {product.category.name}</p>
-                  </TableCell>
-                  <TableCell>
-                    <p className="text-sm">{product.in_stock ? `En stock (${product.stock_qty})` : 'Rupture'}</p>
-                    <p className="text-xs text-slate-500">PoE: {product.poe ? 'Oui' : 'Non'}</p>
-                  </TableCell>
-                  <TableCell>{Number(product.base_price).toFixed(2)} EUR</TableCell>
-                  <TableCell>
-                    <div className="flex justify-end gap-2">
-                      <Button variant="outline" size="sm" onClick={() => openEdit(product)}>Modifier</Button>
-                      <Button
-                        variant="outline" size="sm"
-                        disabled={product.type !== 'CONFIGURABLE'}
-                        onClick={() => {
-                          setOptionDialogProduct(product)
-                          resetOptionForm()
-                        }}
-                      >
-                        Options
-                      </Button>
-                      <Button variant="outline" size="sm" onClick={() => removeProduct(product)}>Supprimer</Button>
-                    </div>
-                  </TableCell>
+        <CardContent className="space-y-4">
+          {/* Recherche + tri */}
+          <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
+            <Input
+              value={productSearch}
+              onChange={(e) => setProductSearch(e.target.value)}
+              placeholder="Rechercher par nom, marque, catégorie, famille..."
+              className="sm:max-w-sm"
+            />
+            <select
+              value={productSort}
+              onChange={(e) => setProductSort(e.target.value as SortOption)}
+              className="h-10 rounded border border-slate-200 bg-white px-3 text-sm sm:w-auto"
+            >
+              <option value="default">Trier par…</option>
+              <option value="newest">Plus récents</option>
+              <option value="oldest">Plus anciens</option>
+              <option value="name_asc">Nom (A → Z)</option>
+              <option value="name_desc">Nom (Z → A)</option>
+              <option value="price_asc">Prix croissant</option>
+              <option value="price_desc">Prix décroissant</option>
+              <option value="stock_asc">Stock croissant</option>
+              <option value="stock_desc">Stock décroissant</option>
+            </select>
+          </div>
+
+          <div className="overflow-x-auto">
+            <Table>
+              <TableHeader>
+                <TableRow>
+                  <TableHead>Nom</TableHead>
+                  <TableHead>Type</TableHead>
+                  <TableHead>Brand / Family</TableHead>
+                  <TableHead>Stock / PoE</TableHead>
+                  <TableHead>Prix</TableHead>
+                  <TableHead className="text-right">Actions</TableHead>
                 </TableRow>
-              ))}
-            </TableBody>
-          </Table>
+              </TableHeader>
+              <TableBody>
+                {paginatedProducts.length === 0 ? (
+                  <TableRow>
+                    <TableCell colSpan={6} className="py-8 text-center text-sm text-slate-500">
+                      Aucun produit ne correspond à votre recherche.
+                    </TableCell>
+                  </TableRow>
+                ) : (
+                  paginatedProducts.map((product) => {
+                    const isNew = product.id === highlightedProductId
+                    return (
+                      <TableRow
+                        key={product.id}
+                        ref={(el) => {
+                          if (isNew && el) el.scrollIntoView({ behavior: 'smooth', block: 'center' })
+                        }}
+                        className={isNew ? 'bg-emerald-50/80 ring-1 ring-inset ring-emerald-300' : undefined}
+                      >
+                        <TableCell className="font-medium">
+                          <div className="flex items-center gap-2">
+                            {product.image_url && (
+                              // eslint-disable-next-line @next/next/no-img-element
+                              <img
+                                src={product.image_url}
+                                alt={product.name}
+                                className="h-8 w-8 rounded object-cover border border-slate-100 shrink-0"
+                                onError={(e) => { (e.currentTarget as HTMLImageElement).style.display = 'none' }}
+                              />
+                            )}
+                            <span className="truncate max-w-[180px] sm:max-w-none">{product.name}</span>
+                            {isNew && (
+                              <span className="inline-flex shrink-0 items-center gap-1 rounded-full bg-emerald-100 px-2 py-0.5 text-[10px] font-semibold text-emerald-700">
+                                ✨ Nouveau
+                              </span>
+                            )}
+                          </div>
+                        </TableCell>
+                        <TableCell>{product.type}</TableCell>
+                        <TableCell>
+                          <p>{product.brand.name}</p>
+                          <p className="text-xs text-slate-500">{product.family.name} / {product.category.name}</p>
+                        </TableCell>
+                        <TableCell>
+                          <p className="text-sm">{product.in_stock ? `En stock (${product.stock_qty})` : 'Rupture'}</p>
+                          <p className="text-xs text-slate-500">PoE: {product.poe ? 'Oui' : 'Non'}</p>
+                        </TableCell>
+                        <TableCell>{Number(product.base_price).toFixed(2)} EUR</TableCell>
+                        <TableCell>
+                          <div className="flex flex-wrap justify-end gap-2">
+                            <Button variant="outline" size="sm" onClick={() => openEdit(product)}>Modifier</Button>
+                            <Button
+                              variant="outline" size="sm"
+                              disabled={product.type !== 'CONFIGURABLE'}
+                              onClick={() => {
+                                setOptionDialogProduct(product)
+                                resetOptionForm()
+                              }}
+                            >
+                              Options
+                            </Button>
+                            <Button variant="outline" size="sm" onClick={() => removeProduct(product)}>Supprimer</Button>
+                          </div>
+                        </TableCell>
+                      </TableRow>
+                    )
+                  })
+                )}
+              </TableBody>
+            </Table>
+          </div>
+
+          {processedProducts.length > 0 && (
+            <>
+              <p className="text-xs text-slate-500">
+                Affichage {(productSafePage - 1) * PRODUCTS_PER_PAGE + 1}
+                –{Math.min(productSafePage * PRODUCTS_PER_PAGE, processedProducts.length)} sur {processedProducts.length}
+              </p>
+              <ProductsPagination
+                currentPage={productSafePage}
+                totalPages={productTotalPages}
+                onPageChange={setProductPage}
+              />
+            </>
+          )}
         </CardContent>
       </Card>
 
@@ -813,7 +1056,7 @@ export default function AdminProductsPage() {
 
             <div className="space-y-2">
               <Label>Disponibilité</Label>
-              <div className="flex h-10 items-center gap-5 rounded border border-slate-200 bg-white px-3 text-sm">
+              <div className="flex h-10 flex-wrap items-center gap-5 rounded border border-slate-200 bg-white px-3 text-sm">
                 <label className="flex items-center gap-2">
                   <input
                     type="checkbox" checked={form.in_stock}
@@ -877,7 +1120,7 @@ export default function AdminProductsPage() {
                 )}
                 <div className="space-y-2 rounded border p-2">
                   {specRows.map((entry, index) => (
-                    <div key={index} className="grid grid-cols-[1fr_1fr_auto] gap-2">
+                    <div key={index} className="grid grid-cols-1 gap-2 sm:grid-cols-[1fr_1fr_auto]">
                       <select
                         className="h-10 w-full rounded border border-slate-200 bg-white px-3 text-sm"
                         value={entry.key}
@@ -1057,7 +1300,7 @@ export default function AdminProductsPage() {
             {/* ── Toggle mode ─────────────────────────────────────────────── */}
             <div className="space-y-2">
               <Label>Mode d'affichage</Label>
-              <div className="flex gap-1 rounded-lg border border-slate-200 bg-slate-50 p-1 w-fit">
+              <div className="flex flex-wrap gap-1 rounded-lg border border-slate-200 bg-slate-50 p-1 w-fit">
                 <button
                   type="button"
                   onClick={() => {
@@ -1125,7 +1368,7 @@ export default function AdminProductsPage() {
                 <div className="space-y-4">
                   {optionGroupValues.map((group, groupIndex) => (
                     <div key={groupIndex} className="rounded border border-slate-200 p-3 space-y-3">
-                      <div className="flex items-center justify-between gap-2">
+                      <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
                         <div className="flex-1">
                           <Label className="text-xs">Nom du groupe</Label>
                           <Input
@@ -1143,7 +1386,7 @@ export default function AdminProductsPage() {
                           onClick={() => setOptionGroupValues((prev) =>
                             prev.length > 1 ? prev.filter((_, i) => i !== groupIndex) : [{ group_name: '', products: [''] }]
                           )}
-                          className="mt-5"
+                          className="sm:mt-5"
                         >
                           Supprimer le groupe
                         </Button>
@@ -1152,7 +1395,7 @@ export default function AdminProductsPage() {
                       <div className="space-y-2">
                         <Label className="text-xs">Produits dans ce groupe</Label>
                         {group.products.map((productId, productIndex) => (
-                          <div key={productIndex} className="flex gap-2 items-start">
+                          <div key={productIndex} className="flex flex-col gap-2 sm:flex-row sm:items-start">
                             <div className="flex-1">
                               <StandardProductSelect
                                 value={productId}
@@ -1217,7 +1460,7 @@ export default function AdminProductsPage() {
                 // Mode sans groupes - simple liste
                 <div className="space-y-2">
                   {optionSimpleValues.map((entry, index) => (
-                    <div key={index} className="flex gap-2 items-start">
+                    <div key={index} className="flex flex-col gap-2 sm:flex-row sm:items-start">
                       <div className="flex-1">
                         <StandardProductSelect
                           value={entry.standard_product_id}
@@ -1263,7 +1506,7 @@ export default function AdminProductsPage() {
             </div>
 
             {/* Actions */}
-            <div className="flex gap-2">
+            <div className="flex flex-wrap gap-2">
               {editingOptionId && (
                 <Button variant="outline" onClick={resetOptionForm}>
                   Annuler édition
@@ -1283,8 +1526,8 @@ export default function AdminProductsPage() {
               <div className="space-y-2">
                 {optionDialogProduct?.configuration_options.map((option) => (
                   <div key={option.id} className="rounded border p-3 text-sm">
-                    <div className="flex items-center justify-between gap-2 mb-2">
-                      <div className="flex items-center gap-2">
+                    <div className="flex flex-wrap items-center justify-between gap-2 mb-2">
+                      <div className="flex flex-wrap items-center gap-2">
                         <p className="font-medium text-slate-800">📋 {option.name}</p>
                         <span className="rounded-full bg-slate-100 px-2 py-0.5 text-xs text-slate-500">
                           {option.use_groups ? '🗂️ Groupes' : '📋 Liste'}
@@ -1302,7 +1545,7 @@ export default function AdminProductsPage() {
                     </div>
                     <div className="space-y-1">
                       {option.values.map((v) => (
-                        <div key={v.id} className="flex items-center gap-2 rounded bg-slate-50 px-2 py-1 text-xs text-slate-600">
+                        <div key={v.id} className="flex flex-wrap items-center gap-2 rounded bg-slate-50 px-2 py-1 text-xs text-slate-600">
                           {option.use_groups && v.group_name && (
                             <>
                               <span className="font-medium text-slate-700">{v.group_name}</span>

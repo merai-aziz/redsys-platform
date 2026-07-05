@@ -14,10 +14,18 @@ import { SHIPPING_RATES, VAT_RATE, SUPPORT_CONTACT } from '@/lib/constants'
 import React from 'react'
 
 type ShippingMethod = 'standard' | 'express'
-type PaymentMethod = 'bancontact' | 'belfius' | 'card' | 'gpay' | 'kbc' | 'paypal' | 'bank' | 'chorus'
+type PaymentMethod = 'bancontact' | 'belfius' | 'card' | 'gpay' | 'kbc' | 'paypal' |'flouci' | 'bank' | 'chorus'
 
 function formatCurrency(value: number) {
     return value.toLocaleString('fr-FR', { style: 'currency', currency: 'EUR' })
+}
+
+// Calcule le prix unitaire réel d'une ligne "configurable" en tenant
+// compte de la quantité de CHAQUE option (option.qty), pas seulement de sa présence.
+// Fix du bug hérité de CartContext.totalPrice qui ne multipliait pas par option.qty.
+function getConfigurableUnitPrice(item: { basePrice: number; options?: Array<{ price: number; qty?: number }> }) {
+    const optionsTotal = (item.options ?? []).reduce((s, o) => s + o.price * (o.qty ?? 1), 0)
+    return item.basePrice + optionsTotal
 }
 
 interface AppNotification {
@@ -58,6 +66,7 @@ const PAYMENT_METHODS_CONFIG = [
     { id: 'gpay', labelMain: 'Google Pay', iconId: 'gpay' },
     { id: 'kbc', labelMain: 'KBC/CBC', iconId: 'kbc' },
     { id: 'paypal', labelMain: 'PayPal', iconId: 'paypal' },
+    { id: 'flouci', labelMain: 'Flouci', iconId: 'flouci' },
     { id: 'bank', labelMain: 'Virement bancaire préalable', iconId: 'bank' },
     { id: 'chorus', labelMain: 'Chorus Pro', iconId: 'chorus' },
 ] as const
@@ -90,7 +99,7 @@ const FOOTER_LINKS = [
 export default function CheckoutPage() {
     const router = useRouter()
     const { user, isAuthenticated, loading, isAdmin, logout } = useAuth()
-    const { items, totalPrice, clearCart } = useCart()
+    const { items, clearCart } = useCart()
     const [userMenuOpen, setUserMenuOpen] = useState(false)
     const userMenuRef = useRef<HTMLDivElement>(null)
     const [notifications, setNotifications] = useState<AppNotification[]>([])
@@ -113,7 +122,18 @@ export default function CheckoutPage() {
     const [openSection, setOpenSection] = useState<typeof SECTIONS_CONFIG[number]['id']>('address')
 
     const shippingPrice = SHIPPING_RATES[shippingMethod]
-    const subtotal = totalPrice
+
+    // FIX : on ne se fie plus à useCart().totalPrice (bug : ne multiplie pas les options
+    // par leur quantité). On recalcule un sous-total fiable ici.
+    const subtotal = useMemo(() => {
+        return items.reduce((sum, item) => {
+            if (item.type === 'configurable') {
+                return sum + getConfigurableUnitPrice(item) * item.quantity
+            }
+            return sum + item.price * item.quantity
+        }, 0)
+    }, [items])
+
     const tax = subtotal * VAT_RATE
     const orderTotal = subtotal + tax + shippingPrice
 
@@ -188,18 +208,62 @@ export default function CheckoutPage() {
         try {
             const orderItems = items.map((item) => {
                 if (item.type === 'configurable') {
-                    const optTotal = (item.options ?? []).reduce((s, o) => s + o.price, 0)
-                    const unitPrice = item.basePrice + optTotal
-                    return { productId: null, quantity: item.quantity, unitPrice, lineTotal: unitPrice * item.quantity, description: `${item.name} (configuré)` }
+                    // FIX : unitPrice tient maintenant compte de la quantité de chaque option
+                    const unitPrice = getConfigurableUnitPrice(item)
+                    // modelId = String(product.id) du produit configurable
+                    const productId = Number(item.modelId)
+
+                    // Transmet les options réellement sélectionnées
+                    // (optionId = ConfigurationValue.id) pour que le backend sache
+                    // EXACTEMENT quel(s) produit(s) standard décrémenter.
+                    const selectedOptions = (item.options ?? [])
+                        .filter((o): o is typeof o & { optionId: number } => typeof o.optionId === 'number')
+                        .map((o) => ({
+                            configurationValueId: o.optionId,
+                            quantity: o.qty ?? 1,
+                        }))
+
+                    return {
+                        productId: Number.isFinite(productId) && productId > 0 ? productId : null,
+                        quantity: item.quantity,
+                        unitPrice,
+                        lineTotal: unitPrice * item.quantity,
+                        description: `${item.name} (configuré)`,
+                        selectedOptions,
+                    }
                 }
-                return { productId: (item as any).productId || null, quantity: item.quantity, unitPrice: item.price, lineTotal: item.price * item.quantity, description: item.name }
+                // STANDARD et SPARE : modelId = String(product.id)
+                const productId = Number(item.modelId)
+                return {
+                    productId: Number.isFinite(productId) && productId > 0 ? productId : null,
+                    quantity: item.quantity,
+                    unitPrice: item.price,
+                    lineTotal: item.price * item.quantity,
+                    description: item.name,
+                }
             })
+
             const res = await fetch('/api/orders', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ items: orderItems, shippingMethod, paymentMethod, shippingAddress: formData, subtotal, tax, shipping: shippingPrice, total: orderTotal }),
+                body: JSON.stringify({
+                    items: orderItems,
+                    shippingMethod,
+                    paymentMethod,
+                    shippingAddress: formData,
+                    subtotal,
+                    tax,
+                    shipping: shippingPrice,
+                    total: orderTotal,
+                }),
             })
-            if (!res.ok) { const data = await res.json(); toast.error(data.error ?? 'Erreur lors de la commande'); return }
+
+            if (!res.ok) {
+                const data = await res.json()
+                toast.error(data.error ?? 'Erreur lors de la commande')
+                return
+            }
+
             clearCart()
             setOrderSuccess(true)
             toast.success('Commande passée avec succès !')
@@ -516,8 +580,8 @@ export default function CheckoutPage() {
                                         {items.map((item, idx) => {
                                             let lineTotal = 0
                                             if (item.type === 'configurable') {
-                                                const optionsTotal = (item.options ?? []).reduce((s, o) => s + o.price, 0)
-                                                lineTotal = (item.basePrice + optionsTotal) * item.quantity
+                                                // FIX : multiplie chaque option par sa quantité propre
+                                                lineTotal = getConfigurableUnitPrice(item) * item.quantity
                                             } else {
                                                 lineTotal = item.price * item.quantity
                                             }
@@ -539,9 +603,16 @@ export default function CheckoutPage() {
                                                         <p className="text-sm font-semibold leading-snug text-slate-700">{item.name}</p>
                                                         {item.type === 'configurable' && (item.options ?? []).length > 0 && (
                                                             <ul className="mt-1 space-y-0.5">
-                                                                {(item.options ?? []).map((opt, i) => (
-                                                                    <li key={i} className="truncate text-xs text-slate-400">{opt.label} <span className="text-slate-500">+{formatCurrency(opt.price)}</span></li>
-                                                                ))}
+                                                                {(item.options ?? []).map((opt, i) => {
+                                                                    const optQty = opt.qty ?? 1
+                                                                    return (
+                                                                        <li key={i} className="truncate text-xs text-slate-400">
+                                                                            {opt.label}
+                                                                            {optQty > 1 && <span className="text-slate-400"> ×{optQty}</span>}{' '}
+                                                                            <span className="text-slate-500">+{formatCurrency(opt.price * optQty)}</span>
+                                                                        </li>
+                                                                    )
+                                                                })}
                                                             </ul>
                                                         )}
                                                         {(item as any).type === 'spare' && (item as any).compatibleModelName && (
@@ -740,4 +811,9 @@ const paymentIcons: Record<string, React.ReactNode> = {
     paypal: (<svg viewBox="0 0 40 24" className="h-5 w-9 sm:h-6 sm:w-10" fill="none"><rect width="40" height="24" rx="4" fill="#003087" /><text x="4" y="16" fontSize="8" fill="white" fontWeight="bold">PayPal</text></svg>),
     bank: (<svg viewBox="0 0 40 24" className="h-5 w-9 sm:h-6 sm:w-10" fill="none"><rect width="40" height="24" rx="4" fill="#f0f4f8" stroke="#d0d9e3" strokeWidth="1" /><path d="M8 16V10M14 16V10M20 16V10M26 16V10M32 16V10M6 10L20 5L34 10H6zM6 17H34" stroke="#1a3a52" strokeWidth="1.5" strokeLinecap="round" /></svg>),
     chorus: (<svg viewBox="0 0 40 24" className="h-5 w-9 sm:h-6 sm:w-10" fill="none"><rect width="40" height="24" rx="4" fill="#003189" /><text x="3" y="16" fontSize="7" fill="white" fontWeight="bold">CHORUS</text></svg>),
+    flouci: (<svg viewBox="0 0 40 24" className="h-5 w-9 sm:h-6 sm:w-10" fill="none">
+            <rect width="40" height="24" rx="4" fill="#0D1B2A" />
+            <text x="5" y="16" fontSize="7" fill="#FFFFFF" fontWeight="bold" letterSpacing="0.5">FLOUCI</text>
+            <circle cx="32" cy="12" r="4" fill="#00D4AA" opacity="0.8" />
+            <path d="M29 10L32 14L35 10" stroke="#0D1B2A" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" /></svg>),
 }

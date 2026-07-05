@@ -1,9 +1,10 @@
 'use client'
 
-import { useEffect, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import {
   Clock, CheckCircle, XCircle, Truck,
   ChevronDown, ChevronUp, Search, Filter,
+  Package, ChevronLeft, ChevronRight, SlidersHorizontal, Layers,
 } from 'lucide-react'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
@@ -20,13 +21,28 @@ interface OrderUser {
   email: string
 }
 
+// Option choisie sur un produit configurable (ex: CPU, RAM, Raid Controller...)
+interface SelectedOption {
+  id?: string | number
+  optionName: string
+  valueName: string
+  groupName?: string | null
+  price?: number | string
+}
+
 interface OrderItem {
   id: string
   quantity: number
   unitPrice: number
   lineTotal: number
   description?: string
-  product?: { name: string; image_url?: string }
+  product?: {
+    name: string
+    image_url?: string
+    type?: 'STANDARD' | 'CONFIGURABLE'
+  }
+  // Optionnel : présent uniquement si le produit est CONFIGURABLE et que l'API le fournit
+  selectedOptions?: SelectedOption[]
 }
 
 interface ShippingAddress {
@@ -75,6 +91,8 @@ const STATUS_TRANSITIONS: Record<OrderStatus, OrderStatus[]> = {
   CANCELLED:  [],
 }
 
+const ORDERS_PER_PAGE = 6
+
 function formatCurrency(value: number | string) {
   return Number(value).toLocaleString('fr-FR', { style: 'currency', currency: 'EUR' })
 }
@@ -83,6 +101,156 @@ function formatDate(dateStr: string) {
   return new Date(dateStr).toLocaleDateString('fr-FR', {
     day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit',
   })
+}
+
+function ProductThumbnail({ src, alt }: { src?: string; alt: string }) {
+  if (src) {
+    return (
+      // eslint-disable-next-line @next/next/no-img-element
+      <img
+        src={src}
+        alt={alt}
+        className="h-14 w-14 shrink-0 rounded-lg border border-slate-100 object-cover"
+        onError={(e) => { (e.currentTarget as HTMLImageElement).style.display = 'none' }}
+      />
+    )
+  }
+  return (
+    <div className="flex h-14 w-14 shrink-0 items-center justify-center rounded-lg border border-slate-100 bg-slate-50">
+      <Package className="h-5 w-5 text-slate-300" />
+    </div>
+  )
+}
+
+// ─── Regroupe les options par groupName pour un affichage plus clair ─────────
+function groupSelectedOptions(options: SelectedOption[]) {
+  const map = new Map<string, SelectedOption[]>()
+  const order: string[] = []
+
+  for (const opt of options) {
+    const key = opt.groupName?.trim() || opt.optionName
+    if (!map.has(key)) {
+      order.push(key)
+      map.set(key, [])
+    }
+    map.get(key)!.push(opt)
+  }
+
+  return order.map((key) => ({ groupLabel: key, items: map.get(key)! }))
+}
+
+function OrderItemRow({ item }: { item: OrderItem }) {
+  const isConfigurable = item.product?.type === 'CONFIGURABLE'
+  const options = item.selectedOptions ?? []
+  const groupedOptions = useMemo(() => groupSelectedOptions(options), [options])
+  const optionsTotal = options.reduce((sum, o) => sum + (Number(o.price) || 0), 0)
+
+  return (
+    <div className="overflow-hidden rounded-xl border border-slate-200 bg-white">
+      {/* En-tête produit */}
+      <div className="flex items-start justify-between gap-3 p-3">
+        <div className="flex min-w-0 flex-1 items-start gap-3">
+          <ProductThumbnail
+            src={item.product?.image_url}
+            alt={item.product?.name ?? item.description ?? 'Produit'}
+          />
+          <div className="min-w-0 flex-1">
+            <div className="flex flex-wrap items-center gap-2">
+              <p className="truncate text-sm font-semibold text-slate-900">
+                {item.product?.name ?? item.description ?? 'Produit'}
+              </p>
+              {isConfigurable && (
+                <span className="inline-flex shrink-0 items-center gap-1 rounded-full bg-purple-50 px-2 py-0.5 text-[10px] font-semibold text-purple-700">
+                  <SlidersHorizontal className="h-2.5 w-2.5" />
+                  Configuré
+                </span>
+              )}
+            </div>
+            <p className="mt-0.5 text-xs text-slate-500">
+              {item.quantity} × {formatCurrency(item.unitPrice)}
+            </p>
+          </div>
+        </div>
+        <p className="shrink-0 text-sm font-bold text-slate-900">{formatCurrency(item.lineTotal)}</p>
+      </div>
+
+      {/* Détail des options du produit configurable */}
+      {isConfigurable && (
+        <div className="border-t border-slate-100 bg-slate-50/70 px-3 py-3">
+          <div className="mb-2 flex items-center justify-between">
+            <p className="flex items-center gap-1.5 text-[11px] font-bold uppercase tracking-wide text-slate-400">
+              <Layers className="h-3 w-3" />
+              Configuration sélectionnée
+            </p>
+            {options.length > 0 && (
+              <span className="text-[11px] font-semibold text-slate-500">
+                {options.length} option{options.length > 1 ? 's' : ''}
+              </span>
+            )}
+          </div>
+
+          {options.length === 0 ? (
+            <p className="rounded-lg border border-dashed border-slate-200 bg-white px-3 py-2 text-xs text-slate-400">
+              Aucun détail d'option disponible pour cet article.
+            </p>
+          ) : (
+            <div className="space-y-2">
+              {groupedOptions.map(({ groupLabel, items: groupItems }) => (
+                <div
+                  key={groupLabel}
+                  className="rounded-lg border border-slate-200 bg-white px-3 py-2"
+                >
+                  <p className="mb-1.5 text-[10px] font-bold uppercase tracking-wider text-slate-400">
+                    {groupLabel}
+                  </p>
+                  <div className="space-y-1.5">
+                    {groupItems.map((opt, idx) => {
+                      const price = Number(opt.price) || 0
+                      return (
+                        <div
+                          key={opt.id ?? `${opt.optionName}-${idx}`}
+                          className="flex items-center justify-between gap-3"
+                        >
+                          <div className="flex min-w-0 items-center gap-2">
+                            <span className="h-1.5 w-1.5 shrink-0 rounded-full bg-[#2ad1a4]" />
+                            <div className="min-w-0">
+                              <span className="block truncate text-xs font-medium text-slate-700">
+                                {opt.valueName}
+                              </span>
+                              {opt.groupName && opt.optionName !== groupLabel && (
+                                <span className="block text-[10px] text-slate-400">
+                                  {opt.optionName}
+                                </span>
+                              )}
+                            </div>
+                          </div>
+                          <span
+                            className={`shrink-0 whitespace-nowrap text-xs font-semibold ${
+                              price > 0 ? 'text-[#0f6e56]' : 'text-slate-400'
+                            }`}
+                          >
+                            {price > 0 ? `+${formatCurrency(price)}` : 'Inclus'}
+                          </span>
+                        </div>
+                      )
+                    })}
+                  </div>
+                </div>
+              ))}
+
+              {/* Total des options, si au moins un supplément payant */}
+              {optionsTotal > 0 && (
+                <div className="flex items-center justify-between rounded-lg bg-slate-100 px-3 py-1.5">
+                  <span className="text-[11px] font-semibold text-slate-500">Total options</span>
+                  <span className="text-xs font-bold text-slate-700">+{formatCurrency(optionsTotal)}</span>
+                </div>
+              )}
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  )
 }
 
 function AdminOrderCard({
@@ -189,17 +357,11 @@ function AdminOrderCard({
         {expanded && (
           <div className="space-y-3 rounded-xl border border-slate-100 bg-slate-50 p-4">
             <p className="text-xs font-bold uppercase tracking-wide text-slate-500">Articles</p>
-            {order.items.map((item) => (
-              <div key={item.id} className="flex items-center justify-between gap-3 rounded-lg border border-slate-200 bg-white p-3">
-                <div className="min-w-0 flex-1">
-                  <p className="truncate text-sm font-semibold text-slate-900">
-                    {item.product?.name ?? item.description ?? 'Produit'}
-                  </p>
-                  <p className="text-xs text-slate-500">{item.quantity} × {formatCurrency(item.unitPrice)}</p>
-                </div>
-                <p className="shrink-0 text-sm font-bold">{formatCurrency(item.lineTotal)}</p>
-              </div>
-            ))}
+            <div className="space-y-3">
+              {order.items.map((item) => (
+                <OrderItemRow key={item.id} item={item} />
+              ))}
+            </div>
 
             {order.shippingAddress && (
               <div className="rounded-lg border border-slate-200 bg-white p-3">
@@ -233,11 +395,90 @@ function AdminOrderCard({
   )
 }
 
+function OrdersPagination({
+  currentPage,
+  totalPages,
+  totalItems,
+  itemsPerPage,
+  onPageChange,
+}: {
+  currentPage: number
+  totalPages: number
+  totalItems: number
+  itemsPerPage: number
+  onPageChange: (page: number) => void
+}) {
+  const pageNumbers = useMemo(() => {
+    const pages: (number | 'ellipsis')[] = []
+    const delta = 1
+    for (let i = 1; i <= totalPages; i++) {
+      if (i === 1 || i === totalPages || (i >= currentPage - delta && i <= currentPage + delta)) {
+        pages.push(i)
+      } else if (pages[pages.length - 1] !== 'ellipsis') {
+        pages.push('ellipsis')
+      }
+    }
+    return pages
+  }, [currentPage, totalPages])
+
+  if (totalPages <= 1) return null
+
+  return (
+    <div className="flex flex-col items-center justify-between gap-3 rounded-xl border border-slate-200 bg-white px-4 py-3 shadow-sm sm:flex-row">
+      <p className="text-xs text-slate-500">
+        Affichage {(currentPage - 1) * itemsPerPage + 1}
+        –{Math.min(currentPage * itemsPerPage, totalItems)} sur {totalItems}
+      </p>
+
+      <div className="flex items-center gap-1">
+        <button
+          onClick={() => onPageChange(currentPage - 1)}
+          disabled={currentPage === 1}
+          className="inline-flex h-8 w-8 items-center justify-center rounded-md border border-slate-200 text-slate-600 transition hover:bg-slate-50 disabled:opacity-40 disabled:hover:bg-transparent"
+        >
+          <ChevronLeft className="h-4 w-4" />
+        </button>
+
+        <div className="flex items-center gap-1">
+          {pageNumbers.map((p, idx) =>
+            p === 'ellipsis' ? (
+              <span key={`ellipsis-${idx}`} className="px-1.5 text-xs text-slate-400">
+                …
+              </span>
+            ) : (
+              <button
+                key={p}
+                onClick={() => onPageChange(p)}
+                className={`h-8 min-w-[2rem] rounded-md px-2 text-xs font-semibold transition ${
+                  p === currentPage
+                    ? 'bg-sky-600 text-white shadow-sm'
+                    : 'text-slate-600 hover:bg-slate-100'
+                }`}
+              >
+                {p}
+              </button>
+            )
+          )}
+        </div>
+
+        <button
+          onClick={() => onPageChange(currentPage + 1)}
+          disabled={currentPage === totalPages}
+          className="inline-flex h-8 w-8 items-center justify-center rounded-md border border-slate-200 text-slate-600 transition hover:bg-slate-50 disabled:opacity-40 disabled:hover:bg-transparent"
+        >
+          <ChevronRight className="h-4 w-4" />
+        </button>
+      </div>
+    </div>
+  )
+}
+
 export default function AdminOrdersPage() {
   const [orders, setOrders] = useState<Order[]>([])
   const [loading, setLoading] = useState(true)
   const [filterStatus, setFilterStatus] = useState<OrderStatus | 'ALL'>('ALL')
   const [search, setSearch] = useState('')
+  const [currentPage, setCurrentPage] = useState(1)
 
   useEffect(() => {
     const controller = new AbortController()
@@ -265,6 +506,18 @@ export default function AdminOrdersPage() {
         o.user.email.toLowerCase().includes(q)
       )
     })
+
+  // Revenir à la page 1 dès que le filtre ou la recherche change
+  useEffect(() => {
+    setCurrentPage(1)
+  }, [filterStatus, search])
+
+  const totalPages = Math.max(1, Math.ceil(filtered.length / ORDERS_PER_PAGE))
+  const safePage = Math.min(currentPage, totalPages)
+  const paginated = filtered.slice(
+    (safePage - 1) * ORDERS_PER_PAGE,
+    safePage * ORDERS_PER_PAGE
+  )
 
   const counts = {
     ALL: orders.length,
@@ -337,11 +590,21 @@ export default function AdminOrdersPage() {
           <p className="mt-1 text-sm text-slate-500">Modifiez les filtres ou la recherche.</p>
         </div>
       ) : (
-        <div className="space-y-4">
-          {filtered.map((order) => (
-            <AdminOrderCard key={order.id} order={order} onStatusChange={handleStatusChange} />
-          ))}
-        </div>
+        <>
+          <div className="space-y-4">
+            {paginated.map((order) => (
+              <AdminOrderCard key={order.id} order={order} onStatusChange={handleStatusChange} />
+            ))}
+          </div>
+
+          <OrdersPagination
+            currentPage={safePage}
+            totalPages={totalPages}
+            totalItems={filtered.length}
+            itemsPerPage={ORDERS_PER_PAGE}
+            onPageChange={setCurrentPage}
+          />
+        </>
       )}
     </div>
   )
