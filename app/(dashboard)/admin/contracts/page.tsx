@@ -4,7 +4,7 @@ import { useEffect, useMemo, useState } from 'react'
 import {
   Search, Plus, X, User, Calendar,
   FileText, Shield, ShieldCheck, ShieldOff, Package,
-  Upload, Sparkles, ChevronLeft, ChevronRight, Pencil
+  Sparkles, ChevronLeft, ChevronRight, Pencil
 } from 'lucide-react'
 import { toast } from 'sonner'
 import { Button } from '@/components/ui/button'
@@ -97,11 +97,10 @@ function CreateContractModal({ onClose, onCreated }: { onClose: () => void; onCr
   const [clientOrders, setClientOrders] = useState<OrderResult[]>([])
   const [selectedOrder, setSelectedOrder] = useState<OrderResult | null>(null)
   const [submitting, setSubmitting] = useState(false)
-  const [uploadingFile, setUploadingFile] = useState(false)
 
   const [form, setForm] = useState({
     companyName: '', clientPhone: '', description: '',
-    fileUrl: '', warrantyMonths: 12, warrantyStart: new Date().toISOString().split('T')[0],
+    warrantyMonths: 12, warrantyStart: new Date().toISOString().split('T')[0],
   })
   const [manualItems, setManualItems] = useState<Array<{ name: string; quantity: number }>>([])
 
@@ -140,44 +139,6 @@ function CreateContractModal({ onClose, onCreated }: { onClose: () => void; onCr
     setStep('form')
   }
 
-  async function handleFileUpload(e: React.ChangeEvent<HTMLInputElement>) {
-    const file = e.target.files?.[0]
-    if (!file) return
-
-    if (file.size > 10 * 1024 * 1024) {
-      toast.error('Le fichier ne doit pas dépasser 10 Mo')
-      return
-    }
-
-    const allowedTypes = ['application/pdf', 'image/jpeg', 'image/png', 'application/msword', 'application/vnd.openxmlformats-officedocument.wordprocessingml.document']
-    if (!allowedTypes.includes(file.type)) {
-      toast.error('Format non supporté. Utilisez PDF, JPG, PNG ou DOC')
-      return
-    }
-
-    setUploadingFile(true)
-    try {
-      const formData = new FormData()
-      formData.append('file', file)
-
-      const res = await fetch('/api/admin/upload', {
-        method: 'POST',
-        body: formData,
-      })
-
-      if (!res.ok) throw new Error('Upload failed')
-      
-      const data = await res.json()
-      setForm(f => ({ ...f, fileUrl: data.fileUrl }))
-      toast.success('Fichier uploadé avec succès')
-    } catch (error) {
-      console.error('Upload error:', error)
-      toast.error('Erreur lors de l\'upload du fichier')
-    } finally {
-      setUploadingFile(false)
-    }
-  }
-
   async function handleSubmit() {
     if (!selectedClient || !form.companyName || !form.warrantyStart) {
       toast.error('Champs obligatoires manquants')
@@ -209,7 +170,6 @@ function CreateContractModal({ onClose, onCreated }: { onClose: () => void; onCr
           clientEmail: selectedClient.email,
           clientPhone: form.clientPhone || null,
           description: form.description || null,
-          fileUrl: form.fileUrl || null,
           warrantyMonths: form.warrantyMonths,
           warrantyStart: form.warrantyStart,
           items,
@@ -328,37 +288,12 @@ function CreateContractModal({ onClose, onCreated }: { onClose: () => void; onCr
                   <label className="mb-1 block text-xs font-semibold text-slate-600">Date début garantie *</label>
                   <Input type="date" value={form.warrantyStart} onChange={e => setForm(f => ({ ...f, warrantyStart: e.target.value }))} className="border-slate-200" />
                 </div>
-                
-                {/* Upload de fichier */}
-                <div className="sm:col-span-2">
-                  <label className="mb-1 block text-xs font-semibold text-slate-600">Document du contrat (PDF, image, etc.)</label>
-                  <div className="flex gap-2">
-                    <div className="flex-1">
-                      <Input 
-                        value={form.fileUrl} 
-                        onChange={e => setForm(f => ({ ...f, fileUrl: e.target.value }))} 
-                        placeholder="https://... ou /uploads/contrat.pdf" 
-                        className="border-slate-200" 
-                      />
-                    </div>
-                    <div className="relative">
-                      <input
-                        type="file"
-                        accept=".pdf,.jpg,.jpeg,.png,.doc,.docx"
-                        onChange={handleFileUpload}
-                        disabled={uploadingFile}
-                        className="absolute inset-0 opacity-0 cursor-pointer"
-                      />
-                      <Button type="button" disabled={uploadingFile} variant="outline" className="border-slate-200">
-                        {uploadingFile ? (
-                          <div className="h-4 w-4 animate-spin rounded-full border-2 border-slate-300 border-t-sky-600" />
-                        ) : (
-                          <Upload className="h-4 w-4" />
-                        )}
-                      </Button>
-                    </div>
-                  </div>
-                  <p className="mt-1 text-[10px] text-slate-400">Formats acceptés: PDF, JPG, PNG, DOC (max 10 Mo)</p>
+
+                <div className="sm:col-span-2 rounded-lg border border-dashed border-slate-200 bg-slate-50 px-3 py-2">
+                  <p className="text-[11px] text-slate-500">
+                    <FileText className="mr-1 inline h-3.5 w-3.5 text-slate-400" />
+                    Le PDF du contrat sera généré automatiquement à partir de ces informations.
+                  </p>
                 </div>
 
                 <div className="sm:col-span-2">
@@ -425,49 +360,13 @@ function EditContractModal({
   onUpdated: (c: Contract) => void
 }) {
   const [submitting, setSubmitting] = useState(false)
-  const [uploadingFile, setUploadingFile] = useState(false)
   const [form, setForm] = useState({
     companyName: contract.companyName,
     clientPhone: contract.clientPhone ?? '',
     description: contract.description ?? '',
-    fileUrl: contract.fileUrl ?? '',
     warrantyMonths: contract.warrantyMonths,
     warrantyStart: contract.warrantyStart.split('T')[0],
   })
-
-  async function handleFileUpload(e: React.ChangeEvent<HTMLInputElement>) {
-    const file = e.target.files?.[0]
-    if (!file) return
-
-    if (file.size > 10 * 1024 * 1024) {
-      toast.error('Le fichier ne doit pas dépasser 10 Mo')
-      return
-    }
-
-    const allowedTypes = ['application/pdf', 'image/jpeg', 'image/png', 'application/msword', 'application/vnd.openxmlformats-officedocument.wordprocessingml.document']
-    if (!allowedTypes.includes(file.type)) {
-      toast.error('Format non supporté. Utilisez PDF, JPG, PNG ou DOC')
-      return
-    }
-
-    setUploadingFile(true)
-    try {
-      const formData = new FormData()
-      formData.append('file', file)
-
-      const res = await fetch('/api/admin/upload', { method: 'POST', body: formData })
-      if (!res.ok) throw new Error('Upload failed')
-
-      const data = await res.json()
-      setForm(f => ({ ...f, fileUrl: data.fileUrl }))
-      toast.success('Fichier uploadé avec succès')
-    } catch (error) {
-      console.error('Upload error:', error)
-      toast.error('Erreur lors de l\'upload du fichier')
-    } finally {
-      setUploadingFile(false)
-    }
-  }
 
   async function handleSubmit() {
     if (!form.companyName || !form.warrantyStart) {
@@ -483,7 +382,6 @@ function EditContractModal({
           companyName: form.companyName,
           clientPhone: form.clientPhone || null,
           description: form.description || null,
-          fileUrl: form.fileUrl || null,
           warrantyMonths: form.warrantyMonths,
           warrantyStart: form.warrantyStart,
         }),
@@ -539,35 +437,11 @@ function EditContractModal({
                 <Input type="date" value={form.warrantyStart} onChange={e => setForm(f => ({ ...f, warrantyStart: e.target.value }))} className="border-slate-200" />
               </div>
 
-              <div className="sm:col-span-2">
-                <label className="mb-1 block text-xs font-semibold text-slate-600">Document du contrat (PDF, image, etc.)</label>
-                <div className="flex gap-2">
-                  <div className="flex-1">
-                    <Input
-                      value={form.fileUrl}
-                      onChange={e => setForm(f => ({ ...f, fileUrl: e.target.value }))}
-                      placeholder="https://... ou /uploads/contrat.pdf"
-                      className="border-slate-200"
-                    />
-                  </div>
-                  <div className="relative">
-                    <input
-                      type="file"
-                      accept=".pdf,.jpg,.jpeg,.png,.doc,.docx"
-                      onChange={handleFileUpload}
-                      disabled={uploadingFile}
-                      className="absolute inset-0 opacity-0 cursor-pointer"
-                    />
-                    <Button type="button" disabled={uploadingFile} variant="outline" className="border-slate-200">
-                      {uploadingFile ? (
-                        <div className="h-4 w-4 animate-spin rounded-full border-2 border-slate-300 border-t-sky-600" />
-                      ) : (
-                        <Upload className="h-4 w-4" />
-                      )}
-                    </Button>
-                  </div>
-                </div>
-                <p className="mt-1 text-[10px] text-slate-400">Formats acceptés: PDF, JPG, PNG, DOC (max 10 Mo)</p>
+              <div className="sm:col-span-2 rounded-lg border border-dashed border-slate-200 bg-slate-50 px-3 py-2">
+                <p className="text-[11px] text-slate-500">
+                  <FileText className="mr-1 inline h-3.5 w-3.5 text-slate-400" />
+                  Le PDF du contrat sera régénéré automatiquement à partir de ces informations.
+                </p>
               </div>
 
               <div className="sm:col-span-2">

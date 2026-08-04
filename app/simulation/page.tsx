@@ -2,6 +2,7 @@
 
 import { useEffect, useRef, useState, useMemo } from 'react'
 import { useRouter } from 'next/navigation'
+import { DomainCode, NeedField, NeedsState, DOMAIN_NEEDS } from '@/lib/domainNeeds'
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -62,210 +63,8 @@ interface ProductDetail {
   options: ConfigOption[]
 }
 
-type DomainCode = 'SERVER' | 'STORAGE' | 'NETWORK'
-
-// ─── Domain needs definitions ─────────────────────────────────────────────────
-
-interface NeedField {
-  id: string
-  label: string
-  type: 'slider' | 'select'
-  min?: number
-  max?: number
-  step?: number
-  unit?: string
-  options?: string[]
-  defaultValue: number | string
-  impact: {
-    cpu?: number
-    ram?: number
-    temp?: number
-    bandwidth?: number
-    diskIO?: number
-    power?: number
-  }
-}
-
-const DOMAIN_NEEDS: Record<DomainCode, NeedField[]> = {
-  SERVER: [
-    {
-      id: 'virtualization',
-      label: 'Type de virtualisation',
-      type: 'select',
-      options: ['Aucune', 'VMware ESXi', 'Hyper-V', 'KVM', 'Proxmox', 'Xen'],
-      defaultValue: 'Aucune',
-      impact: { cpu: 0.4, ram: 0.35, power: 0.2 },
-    },
-    {
-      id: 'os',
-      label: 'Système d\'exploitation',
-      type: 'select',
-      options: ['Linux', 'Windows Server', 'FreeBSD', 'VMware ESXi', 'Bare Metal'],
-      defaultValue: 'Linux',
-      impact: { ram: 0.15, diskIO: 0.1 },
-    },
-    {
-      id: 'nb_vm',
-      label: 'Nombre de VMs',
-      type: 'slider',
-      min: 0, max: 200, step: 5, unit: 'VMs',
-      defaultValue: 0,
-      impact: { cpu: 0.55, ram: 0.6, power: 0.35, temp: 0.3 },
-    },
-    {
-      id: 'db_type',
-      label: 'Type de base de données',
-      type: 'select',
-      options: ['Aucune', 'PostgreSQL', 'MySQL', 'MongoDB', 'Oracle', 'SQL Server', 'Redis'],
-      defaultValue: 'Aucune',
-      impact: { ram: 0.3, diskIO: 0.45, cpu: 0.2 },
-    },
-    {
-      id: 'nb_users',
-      label: 'Nombre d\'utilisateurs',
-      type: 'slider',
-      min: 0, max: 5000, step: 50, unit: 'users',
-      defaultValue: 0,
-      impact: { cpu: 0.3, ram: 0.25, bandwidth: 0.5, power: 0.15 },
-    },
-    {
-      id: 'network_load',
-      label: 'Charge réseau',
-      type: 'slider',
-      min: 0, max: 100, step: 5, unit: '%',
-      defaultValue: 0,
-      impact: { bandwidth: 0.7, cpu: 0.15, power: 0.1 },
-    },
-    {
-      id: 'cache_size',
-      label: 'Taille du cache',
-      type: 'slider',
-      min: 0, max: 512, step: 8, unit: 'GB',
-      defaultValue: 0,
-      impact: { ram: 0.5, diskIO: 0.3, cpu: 0.1 },
-    },
-  ],
-  STORAGE: [
-    {
-      id: 'capacity_needed',
-      label: 'Capacité requise',
-      type: 'slider',
-      min: 0, max: 2000, step: 50, unit: 'TB',
-      defaultValue: 0,
-      impact: { diskIO: 0.4, power: 0.3, temp: 0.2 },
-    },
-    {
-      id: 'data_type',
-      label: 'Type de données',
-      type: 'select',
-      options: ['Fichiers plats', 'Bases de données', 'Archives', 'Média/Vidéo', 'Sauvegardes', 'Objets S3'],
-      defaultValue: 'Fichiers plats',
-      impact: { diskIO: 0.35, bandwidth: 0.25, cpu: 0.15 },
-    },
-    {
-      id: 'nb_servers',
-      label: 'Serveurs connectés',
-      type: 'slider',
-      min: 0, max: 100, step: 1, unit: 'serveurs',
-      defaultValue: 0,
-      impact: { bandwidth: 0.6, cpu: 0.2, power: 0.25 },
-    },
-    {
-      id: 'iops',
-      label: 'IOPS attendus',
-      type: 'slider',
-      min: 0, max: 500000, step: 5000, unit: 'IOPS',
-      defaultValue: 0,
-      impact: { diskIO: 0.7, cpu: 0.3, temp: 0.25, power: 0.3 },
-    },
-    {
-      id: 'redundancy',
-      label: 'Niveau de redondance',
-      type: 'select',
-      options: ['Aucune', 'RAID 1', 'RAID 5', 'RAID 6', 'RAID 10', 'Erasure Coding'],
-      defaultValue: 'Aucune',
-      impact: { diskIO: 0.2, cpu: 0.25, power: 0.2 },
-    },
-    {
-      id: 'protocol',
-      label: 'Protocole de stockage',
-      type: 'select',
-      options: ['iSCSI', 'Fibre Channel', 'NFS', 'SMB/CIFS', 'S3', 'NVMe-oF'],
-      defaultValue: 'iSCSI',
-      impact: { bandwidth: 0.4, cpu: 0.2, diskIO: 0.15 },
-    },
-    {
-      id: 'replication',
-      label: 'Réplication distante',
-      type: 'slider',
-      min: 0, max: 100, step: 10, unit: '%',
-      defaultValue: 0,
-      impact: { bandwidth: 0.5, cpu: 0.15, power: 0.1 },
-    },
-  ],
-  NETWORK: [
-    {
-      id: 'nb_ports',
-      label: 'Nombre de ports requis',
-      type: 'slider',
-      min: 0, max: 512, step: 8, unit: 'ports',
-      defaultValue: 0,
-      impact: { bandwidth: 0.5, power: 0.4, cpu: 0.15 },
-    },
-    {
-      id: 'throughput',
-      label: 'Débit requis',
-      type: 'slider',
-      min: 0, max: 400, step: 10, unit: 'Gbps',
-      defaultValue: 0,
-      impact: { bandwidth: 0.8, cpu: 0.3, power: 0.35, temp: 0.2 },
-    },
-    {
-      id: 'nb_vlans',
-      label: 'Nombre de VLANs',
-      type: 'slider',
-      min: 0, max: 4096, step: 64, unit: 'VLANs',
-      defaultValue: 0,
-      impact: { cpu: 0.35, ram: 0.25, bandwidth: 0.15 },
-    },
-    {
-      id: 'traffic_type',
-      label: 'Type de trafic',
-      type: 'select',
-      options: ['Data center Est-Ouest', 'Edge/Internet', 'Voix/Vidéo', 'Stockage SAN', 'HPC/Calcul', 'Mixte'],
-      defaultValue: 'Mixte',
-      impact: { bandwidth: 0.4, cpu: 0.2, ram: 0.15 },
-    },
-    {
-      id: 'redundancy',
-      label: 'Redondance réseau',
-      type: 'select',
-      options: ['Aucune', 'LACP/Bonding', 'Spanning Tree', 'VRRP/HSRP', 'Multi-chassis LAG', 'Full mesh'],
-      defaultValue: 'Aucune',
-      impact: { cpu: 0.3, ram: 0.2, bandwidth: 0.2 },
-    },
-    {
-      id: 'poe_load',
-      label: 'Charge PoE',
-      type: 'slider',
-      min: 0, max: 100, step: 5, unit: '%',
-      defaultValue: 0,
-      impact: { power: 0.7, temp: 0.35 },
-    },
-    {
-      id: 'routing_complexity',
-      label: 'Complexité du routage',
-      type: 'slider',
-      min: 0, max: 100, step: 5, unit: '%',
-      defaultValue: 0,
-      impact: { cpu: 0.55, ram: 0.4, power: 0.15 },
-    },
-  ],
-}
-
 // ─── Simulation engine ────────────────────────────────────────────────────────
 
-type NeedsState = Record<string, number | string>
 type OptionsState = Record<number, number | null>
 
 interface Metrics {
@@ -770,6 +569,9 @@ export default function SimulationPage() {
     NETWORK: {}
   })
   const [optionsState, setOptionsState] = useState<OptionsState>({})
+  const [recommendedScores, setRecommendedScores] = useState<Record<number, number>>({})
+  const [loadingRecs, setLoadingRecs] = useState(false)
+  const [showNeedsPanel, setShowNeedsPanel] = useState(false)
 
   const [frame, setFrame] = useState(0)
   const rafRef = useRef<number | null>(null)
@@ -818,8 +620,15 @@ export default function SimulationPage() {
       const q = searchQuery.toLowerCase()
       models = models.filter((m) => m.name.toLowerCase().includes(q) || m.brandName.toLowerCase().includes(q))
     }
+    if (Object.keys(recommendedScores).length > 0) {
+      models = [...models].sort((a, b) => {
+        const scoreA = recommendedScores[Number(a.id)] ?? -1
+        const scoreB = recommendedScores[Number(b.id)] ?? -1
+        return scoreB - scoreA
+      })
+    }
     return models
-  }, [byDomain, activeDomain, brandFilter, searchQuery])
+  }, [byDomain, activeDomain, brandFilter, searchQuery, recommendedScores])
 
   async function selectModel(m: CatalogModel) {
     setLoadingDetail(true)
@@ -862,6 +671,32 @@ export default function SimulationPage() {
     }
   }
 
+  async function fetchRecommendations() {
+    setLoadingRecs(true)
+    try {
+      const res = await fetch('/api/recommendations', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          domain: activeDomain,
+          needs: needsPerDomain[activeDomain],
+          limit: 20,
+        }),
+      })
+      if (!res.ok) throw new Error('err')
+      const data = await res.json()
+      const scores: Record<number, number> = {}
+      data.items.forEach((item: { productId: number; fitScore: number }) => {
+        scores[item.productId] = item.fitScore
+      })
+      setRecommendedScores(scores)
+    } catch {
+      setError('Impossible de charger les recommandations.')
+    } finally {
+      setLoadingRecs(false)
+    }
+  }
+
   const domainCode = selectedProduct
     ? inferDomainCode(selectedProduct.domainId, selectedProduct.categoryName, selectedProduct.familyName)
     : activeDomain
@@ -901,13 +736,12 @@ export default function SimulationPage() {
   }
 
   const handleNeedChange = (id: string, val: number | string) => {
-    setNeeds((prev) => {
-      const newNeeds = { ...prev, [id]: val }
-      setNeedsPerDomain((prevDomains) => ({
-        ...prevDomains,
-        [domainCode]: newNeeds
-      }))
-      return newNeeds
+    const targetDomain = step === 'pick-model' ? activeDomain : domainCode
+    setNeedsPerDomain((prevDomains) => {
+      const updated = { ...(prevDomains[targetDomain] ?? {}), [id]: val }
+      const next = { ...prevDomains, [targetDomain]: updated }
+      if (step !== 'pick-model') setNeeds(updated)
+      return next
     })
   }
 
@@ -1025,6 +859,32 @@ export default function SimulationPage() {
             </div>
           </div>
 
+          <div style={{ marginBottom: 24 }}>
+            <button
+              onClick={() => setShowNeedsPanel((v) => !v)}
+              style={{ background: 'transparent', border: '0.5px solid #2c2c2a', borderRadius: 8, color: '#888780', fontSize: 11, padding: '6px 12px', cursor: 'pointer', fontFamily: 'inherit' }}
+            >
+              {showNeedsPanel ? '▾' : '▸'} Affiner mes besoins pour obtenir des recommandations
+            </button>
+
+            {showNeedsPanel && (
+              <div style={{ ...S.card, marginTop: 12, maxWidth: 480 }}>
+                <NeedsPanel
+                  domainCode={activeDomain}
+                  needs={needsPerDomain[activeDomain]}
+                  onChange={handleNeedChange}
+                />
+                <button
+                  onClick={fetchRecommendations}
+                  disabled={loadingRecs}
+                  style={{ marginTop: 16, width: '100%', background: '#1d9e75', border: 'none', borderRadius: 8, padding: '10px 16px', color: '#0a0a09', fontSize: 12, fontWeight: 500, cursor: loadingRecs ? 'wait' : 'pointer', fontFamily: 'inherit' }}
+                >
+                  {loadingRecs ? 'Calcul en cours…' : 'Voir les recommandations'}
+                </button>
+              </div>
+            )}
+          </div>
+
           {loadingDetail && (
             <div style={{ display: 'flex', alignItems: 'center', gap: 10, color: '#5f5e5a', fontSize: 13, marginBottom: 20 }}>
               <div style={{ width: 16, height: 16, border: '2px solid #1d9e75', borderTopColor: 'transparent', borderRadius: '50%', animation: 'spin 0.8s linear infinite' }} />
@@ -1043,10 +903,15 @@ export default function SimulationPage() {
                       key={m.id}
                       onClick={() => selectModel(m)}
                       disabled={loadingDetail}
-                      style={{ background: '#0f0f0e', border: '0.5px solid #1e1e1c', borderRadius: 12, padding: '14px 13px', cursor: 'pointer', textAlign: 'left', transition: 'all 0.18s' }}
+                      style={{ background: '#0f0f0e', border: '0.5px solid #1e1e1c', borderRadius: 12, padding: '14px 13px', cursor: 'pointer', textAlign: 'left', transition: 'all 0.18s', position: 'relative' }}
                       onMouseEnter={(e) => { e.currentTarget.style.borderColor = '#1d9e75'; e.currentTarget.style.background = 'rgba(29,158,117,0.05)' }}
                       onMouseLeave={(e) => { e.currentTarget.style.borderColor = '#1e1e1c'; e.currentTarget.style.background = '#0f0f0e' }}
                     >
+                      {recommendedScores[Number(m.id)] !== undefined && (
+                        <div style={{ position: 'absolute', top: 8, right: 8, background: '#1d9e75', color: '#0a0a09', fontSize: 8, fontWeight: 600, padding: '2px 6px', borderRadius: 4, zIndex: 1 }}>
+                          {Math.round(recommendedScores[Number(m.id)])}% fit
+                        </div>
+                      )}
                       <div style={{ width: '100%', aspectRatio: '16/9', background: '#1a1a18', borderRadius: 7, marginBottom: 11, overflow: 'hidden', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
                         {m.image
                           ? <img src={m.image} alt={m.name} style={{ width: '100%', height: '100%', objectFit: 'cover' }} />

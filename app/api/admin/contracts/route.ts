@@ -1,6 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/prisma'
 import { requireAdmin } from '@/lib/auth'
+import { generateContractPdfBuffer } from '@/lib/pdf/generateContractPdf'
+import { saveContractPdf } from '@/lib/pdf/saveContractPdf'
 
 // GET — liste tous les contrats
 export async function GET(req: NextRequest) {
@@ -210,10 +212,67 @@ export async function POST(req: NextRequest) {
       return newContract
     })
 
+    // ─── Génération automatique du PDF du contrat ─────────────────────────────
+    // Ne se déclenche que si aucun fileUrl n'a été fourni manuellement (rétrocompat).
+    let finalFileUrl = contract.fileUrl
+    if (!finalFileUrl) {
+      try {
+        const linkedOrder = orderId
+          ? await prisma.order.findUnique({
+              where: { id: orderId },
+              select: { id: true, total: true, createdAt: true /*, paymentMethod: true */ },
+            })
+          : null
+
+        const pdfBuffer = await generateContractPdfBuffer({
+          id: contract.id,
+          companyName: contract.companyName,
+          clientFirstName: contract.clientFirstName,
+          clientLastName: contract.clientLastName,
+          clientEmail: contract.clientEmail,
+          clientPhone: contract.clientPhone,
+          description: contract.description,
+          warrantyMonths: contract.warrantyMonths,
+          warrantyStart: contract.warrantyStart,
+          warrantyEnd: contract.warrantyEnd,
+          createdAt: contract.createdAt,
+          contractItems: contract.contractItems.map((item) => ({
+            name: item.name,
+            description: item.description,
+            quantity: item.quantity,
+            selectedOptions: item.selectedOptions.map((so) => ({
+              optionName: so.configurationValue.configuration_option.name,
+              valueName: so.configurationValue.standard_product.name,
+              groupName: so.configurationValue.group_name,
+              // Decimal Prisma -> number, attendu par ContractPdfOption
+              price: Number(so.configurationValue.price),
+            })),
+          })),
+          order: linkedOrder ? {
+            id: linkedOrder.id,
+            createdAt: linkedOrder.createdAt,
+            // Decimal Prisma -> number, attendu par ContractPdfData.order.total
+            total: Number(linkedOrder.total),
+          } : null,
+        })
+
+        finalFileUrl = await saveContractPdf(contract.id, pdfBuffer)
+
+        await prisma.contract.update({
+          where: { id: contract.id },
+          data: { fileUrl: finalFileUrl },
+        })
+      } catch (pdfErr) {
+        console.error('Erreur génération PDF contrat:', pdfErr)
+        // on ne bloque pas la création du contrat si le PDF échoue
+      }
+    }
+
     // ─── Formatage identique au GET, pour que le front puisse afficher
     // directement les options du contrat fraîchement créé ──────────────────────
     const formattedContract = {
       ...contract,
+      fileUrl: finalFileUrl,
       contractItems: contract.contractItems.map((item) => ({
         ...item,
         product: item.product

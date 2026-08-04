@@ -12,6 +12,7 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
       title="Console Administration"
       profileHref="/admin/logs"
       navItems={[
+        { href: '/admin/analytics', label: 'Analytics', icon: BarChart2 }, 
         { href: '/admin/catalog', label: 'Catalogue', icon: Layers },
         { href: '/admin/products', label: 'Produits', icon: Package },
         { href: '/admin/stock', label: 'Stock', icon: BarChart2 },
